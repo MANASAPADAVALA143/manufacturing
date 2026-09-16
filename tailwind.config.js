@@ -6,8 +6,10 @@ export default {
       colors: {
         base: {
           bg: '#0F1419',
+          sidebar: '#0D1117',
           panel: '#1A2129',
           border: '#262E38',
+          hover: '#1E2630',
         },
         accent: {
           blue: '#3B82F6',
