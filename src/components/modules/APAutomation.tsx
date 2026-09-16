@@ -1,27 +1,55 @@
 import { useState, useRef } from 'react';
-import { StatCard, Panel, ClickableRow, Badge, InfoBox, OutlineButton, BlueButton } from '@/components/ui';
+import {
+  StatCard,
+  Panel,
+  ClickableRow,
+  Badge,
+  InfoBox,
+  OutlineButton,
+  BlueButton,
+  StatusDot,
+} from '@/components/ui';
 import { useToast } from '@/components/Toast';
-import { ArrowDown, CheckCircle2, AlertTriangle, Circle, UploadCloud, FileText, X } from 'lucide-react';
+import {
+  ArrowDown,
+  CheckCircle2,
+  AlertTriangle,
+  Circle,
+  UploadCloud,
+  FileText,
+  X,
+  Search,
+  Plus,
+  ScanLine,
+  XCircle,
+  Clock,
+  Copy,
+} from 'lucide-react';
 
 type TabId = 'queue' | 'upload' | 'match' | 'vendor';
 
 const tabs: { id: TabId; label: string }[] = [
   { id: 'queue', label: 'Invoice Queue' },
-  { id: 'upload', label: 'Upload Bill' },
+  { id: 'upload', label: 'Scan & Upload Invoice (OCR)' },
   { id: 'match', label: '3-Way Match' },
   { id: 'vendor', label: 'Vendor Master' },
 ];
 
+// ─── Invoice Queue data ───
 interface Invoice {
   id: string;
-  badge: 'amber' | 'green' | 'blue';
+  vendor: string;
+  amount: string;
+  badge: 'amber' | 'green' | 'blue' | 'red';
   badgeText: string;
 }
 
 const invoices: Invoice[] = [
-  { id: 'INV-10482', badge: 'amber', badgeText: 'Exception' },
-  { id: 'INV-10481', badge: 'green', badgeText: 'Matched' },
-  { id: 'INV-10480', badge: 'blue', badgeText: 'Pending Approval' },
+  { id: 'INV-10482', vendor: 'SKF India', amount: '₹1.8L', badge: 'amber', badgeText: 'Exception' },
+  { id: 'INV-10481', vendor: 'Tata Steel', amount: '₹18.5L', badge: 'green', badgeText: 'Matched' },
+  { id: 'INV-10480', vendor: 'Greaves Cotton', amount: '₹4.2L', badge: 'blue', badgeText: 'Pending Approval' },
+  { id: 'INV-10479', vendor: 'Greaves Cotton', amount: '₹4.2L', badge: 'red', badgeText: 'Duplicate Detected' },
+  { id: 'INV-10478', vendor: 'Asian Paints', amount: '₹62K', badge: 'green', badgeText: 'Matched' },
 ];
 
 type StepStatus = 'completed' | 'flagged' | 'pending';
@@ -30,65 +58,75 @@ const workflowSteps: { label: string; status: StepStatus }[] = [
   { label: 'Supplier invoice', status: 'completed' },
   { label: 'AI extraction', status: 'completed' },
   { label: 'PO match', status: 'completed' },
-  { label: 'GRN match', status: 'completed' },
+  { label: 'GRN match', status: 'pending' },
   { label: 'Business rules', status: 'completed' },
   { label: 'Exception detection', status: 'flagged' },
   { label: 'Approval', status: 'pending' },
   { label: 'ERP', status: 'pending' },
 ];
 
-// Vendor master data
+// ─── Vendor Master data ───
 interface Vendor {
   name: string;
   category: string;
+  gstin: string;
   risk: 'green' | 'amber' | 'red';
   riskLabel: string;
-  totalBills: string;
+  totalBills: number;
   exceptions: number;
   lastBill: string;
+  status: string;
 }
 
 const vendors: Vendor[] = [
-  { name: 'Tata Steel Supplies', category: 'Steel', risk: 'green', riskLabel: 'Low', totalBills: '342', exceptions: 4, lastBill: '2026-09-14' },
-  { name: 'Jindal Metal Works', category: 'Steel', risk: 'green', riskLabel: 'Low', totalBills: '218', exceptions: 2, lastBill: '2026-09-12' },
-  { name: 'Bharat Chemicals Ltd', category: 'Chemicals', risk: 'amber', riskLabel: 'Medium', totalBills: '176', exceptions: 11, lastBill: '2026-09-15' },
-  { name: 'PolyPack Industries', category: 'Packaging', risk: 'amber', riskLabel: 'Medium', totalBills: '94', exceptions: 7, lastBill: '2026-09-10' },
-  { name: 'FastFreight Logistics', category: 'Logistics', risk: 'red', riskLabel: 'High', totalBills: '58', exceptions: 14, lastBill: '2026-09-15' },
-  { name: 'Arcelor Coil Center', category: 'Steel', risk: 'green', riskLabel: 'Low', totalBills: '127', exceptions: 3, lastBill: '2026-09-13' },
+  { name: 'SKF India', category: 'Bearings', gstin: '27AABCS1681G1ZN', risk: 'red', riskLabel: 'HIGH', totalBills: 24, exceptions: 6, lastBill: '15 Sep', status: 'Active' },
+  { name: 'Tata Steel', category: 'Raw Material', gstin: '27AATCS0447N1ZS', risk: 'green', riskLabel: 'LOW', totalBills: 86, exceptions: 2, lastBill: '14 Sep', status: 'Preferred' },
+  { name: 'Greaves Cotton', category: 'Components', gstin: '27AABCG0569P1ZX', risk: 'amber', riskLabel: 'MEDIUM', totalBills: 31, exceptions: 4, lastBill: '13 Sep', status: 'Active' },
+  { name: 'Asian Paints', category: 'Consumables', gstin: '27AAACA9929L1Z5', risk: 'green', riskLabel: 'LOW', totalBills: 18, exceptions: 1, lastBill: '12 Sep', status: 'Active' },
+  { name: 'Bosch India', category: 'Filters', gstin: '27AABCB2690N1ZA', risk: 'green', riskLabel: 'LOW', totalBills: 12, exceptions: 0, lastBill: '10 Sep', status: 'Preferred' },
 ];
 
-// 3-way match data
-const matchData = {
-  po: [
-    { field: 'Supplier', value: 'Tata Steel Supplies' },
-    { field: 'PO Number', value: 'PO-88213' },
-    { field: 'Item', value: 'Steel Coil A36' },
-    { field: 'Quantity', value: '4,200 units' },
-    { field: 'Unit Price', value: '₹14,200' },
-    { field: 'Total', value: '₹5,96,40,000' },
-    { field: 'Delivery Date', value: '2026-09-20' },
-  ],
-  grn: [
-    { field: 'Supplier', value: 'Tata Steel Supplies' },
-    { field: 'GRN Number', value: 'GRN-5521' },
-    { field: 'Item', value: 'Steel Coil A36' },
-    { field: 'Quantity', value: '4,200 units' },
-    { field: 'Unit Price', value: '—' },
-    { field: 'Total', value: '—' },
-    { field: 'Received Date', value: '2026-09-18' },
-  ],
-  bill: [
-    { field: 'Supplier', value: 'Tata Steel Supplies' },
-    { field: 'Bill Number', value: 'INV-10482' },
-    { field: 'Item', value: 'Steel Coil A36' },
-    { field: 'Quantity', value: '4,200 units' },
-    { field: 'Unit Price', value: '₹14,850' },
-    { field: 'Total', value: '₹6,23,70,000' },
-    { field: 'Bill Date', value: '2026-09-18' },
-  ],
-};
+// ─── 3-Way Match data ───
+const poData = [
+  { field: 'Supplier', value: 'SKF India' },
+  { field: 'Item', value: 'Ball Bearings SKF-204' },
+  { field: 'Quantity', value: '500 units' },
+  { field: 'Unit Price', value: '₹310' },
+  { field: 'Total', value: '₹1,55,000' },
+  { field: 'PO Date', value: '01 Sep 2026' },
+  { field: 'Approved by', value: 'Procurement Head' },
+];
 
-const mismatchFields = ['Unit Price', 'Total'];
+const grnData = [
+  { field: 'GRN Status', value: 'NOT RECEIVED YET', warning: true },
+  { field: 'Expected delivery', value: '16 Sep 2026' },
+  { field: 'Store In-charge', value: 'Pending' },
+  { field: 'Note', value: 'GRN required before bill approval' },
+];
+
+const billData = [
+  { field: 'Invoice', value: 'SKF/2026/09/4821' },
+  { field: 'Quantity', value: '500 units', ok: true },
+  { field: 'Unit Price', value: '₹360', mismatch: true },
+  { field: 'Total', value: '₹2,12,400', mismatch: true },
+  { field: 'GST', value: '₹32,400' },
+];
+
+// ─── OCR extracted fields ───
+const extractedFields = [
+  { label: 'Supplier Name', value: 'SKF India Pvt Ltd' },
+  { label: 'Supplier GSTIN', value: '27AABCS1681G1ZN' },
+  { label: 'Invoice Number', value: 'SKF/2026/09/4821' },
+  { label: 'Invoice Date', value: '15 Sep 2026' },
+  { label: 'Due Date', value: '15 Oct 2026' },
+  { label: 'PO Reference', value: 'PO-2026-1180' },
+  { label: 'HSN Code', value: '84829900 (Ball Bearings)' },
+  { label: 'Quantity', value: '500 units' },
+  { label: 'Unit Price', value: '₹360' },
+  { label: 'Subtotal', value: '₹1,80,000' },
+  { label: 'GST (18%)', value: '₹32,400' },
+  { label: 'Total Amount', value: '₹2,12,400' },
+];
 
 export default function APAutomation() {
   const [tab, setTab] = useState<TabId>('queue');
@@ -102,16 +140,16 @@ export default function APAutomation() {
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent-green opacity-75"></span>
           <span className="relative inline-flex h-2 w-2 rounded-full bg-accent-green"></span>
         </span>
-        <span className="font-mono text-sm text-accent-green">Live module — Powered by AP InvoiceFlow</span>
+        <span className="font-mono text-sm text-accent-green">Live module — Powered by AP InvoiceFlow AI</span>
       </div>
 
       {/* KPI strip (always visible) */}
       <div className="grid grid-cols-1 gap-px bg-base-border sm:grid-cols-2 lg:grid-cols-5">
-        <StatCard label="Invoices received" value="1,842" />
-        <StatCard label="AI processed" value="1,761" variant="green" />
+        <StatCard label="Invoices Received" value="1,842" />
+        <StatCard label="AI Processed" value="1,761" variant="green" />
         <StatCard label="Matched" value="1,643" />
         <StatCard label="Exceptions" value="118" variant="amber" />
-        <StatCard label="Pending approval" value="42" />
+        <StatCard label="Pending Approval" value="42" />
       </div>
 
       {/* Tab bar */}
@@ -149,18 +187,38 @@ function InvoiceQueue({
 }) {
   return (
     <div className="space-y-6">
-      <Panel title="Invoice queue">
-        <div className="divide-y divide-base-border">
-          {invoices.map((inv) => (
-            <ClickableRow
-              key={inv.id}
-              onClick={() => setSelected(selected?.id === inv.id ? null : inv)}
-              active={selected?.id === inv.id}
-            >
-              <span className="font-mono text-sm text-ink-primary">{inv.id}</span>
-              <Badge variant={inv.badge}>{inv.badgeText}</Badge>
-            </ClickableRow>
-          ))}
+      <Panel title="Invoice Queue">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-base-border">
+                <th className="px-5 py-3 text-left font-mono text-xs uppercase tracking-wider text-ink-muted">Invoice ID</th>
+                <th className="px-5 py-3 text-left font-mono text-xs uppercase tracking-wider text-ink-muted">Vendor</th>
+                <th className="px-5 py-3 text-right font-mono text-xs uppercase tracking-wider text-ink-muted">Amount</th>
+                <th className="px-5 py-3 text-left font-mono text-xs uppercase tracking-wider text-ink-muted">Status</th>
+                <th className="px-5 py-3 text-right font-mono text-xs uppercase tracking-wider text-ink-muted"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {invoices.map((inv) => (
+                <tr
+                  key={inv.id}
+                  onClick={() => setSelected(selected?.id === inv.id ? null : inv)}
+                  className={`cursor-pointer border-b border-base-border last:border-b-0 transition-colors hover:bg-base-hover ${selected?.id === inv.id ? 'bg-base-hover' : ''}`}
+                >
+                  <td className="px-5 py-4 font-mono text-ink-primary">{inv.id}</td>
+                  <td className="px-5 py-4 text-ink-primary">{inv.vendor}</td>
+                  <td className="px-5 py-4 text-right font-mono text-ink-primary">{inv.amount}</td>
+                  <td className="px-5 py-4">
+                    <Badge variant={inv.badge}>{inv.badgeText}</Badge>
+                  </td>
+                  <td className="px-5 py-4 text-right">
+                    <span className="font-mono text-xs text-accent-blue hover:underline">View</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </Panel>
 
@@ -186,140 +244,164 @@ function InvoiceQueue({
   );
 }
 
-// ─── TAB 2: Upload Bill ───
+// ─── TAB 2: Scan & Upload Invoice (OCR) ───
 function UploadBill() {
   const { showToast } = useToast();
-  const [extracted, setExtracted] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [fileName, setFileName] = useState<string | null>(null);
+  const [uploaded, setUploaded] = useState(true); // demo state: pre-uploaded
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const handleFile = (file: File) => {
-    setFileName(file.name);
-    setExtracted(false);
-    setTimeout(() => {
-      setExtracted(true);
-    }, 800);
+  const handleFile = () => {
+    setUploaded(true);
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
     const file = e.dataTransfer.files[0];
-    if (file) handleFile(file);
+    if (file) handleFile();
   };
-
-  const extractedFields = [
-    { label: 'Supplier Name', value: 'Tata Steel Supplies' },
-    { label: 'Bill No', value: 'INV-10482' },
-    { label: 'Date', value: '2026-09-18' },
-    { label: 'Amount', value: '₹6,23,70,000' },
-    { label: 'PO Reference', value: 'PO-88213' },
-    { label: 'GST Amount', value: '₹11,22,660' },
-  ];
-
-  const lineItems = [
-    { desc: 'Steel Coil A36 — 10mm', qty: '4,200 units', rate: '₹14,850', amount: '₹6,23,70,000' },
-    { desc: 'Freight & Handling', qty: '1 lot', rate: '₹45,000', amount: '₹45,000' },
-  ];
 
   return (
     <div className="space-y-6">
-      {/* Drop zone */}
-      <Panel>
-        <div className="p-5">
+      <div className="grid grid-cols-1 gap-px bg-base-border lg:grid-cols-2">
+        {/* LEFT SIDE: Upload + Preview */}
+        <div className="bg-base-panel p-5 space-y-4">
+          <h3 className="text-sm font-semibold text-ink-primary">Upload Vendor Bill</h3>
+
+          {/* Drop zone */}
           <div
             onClick={() => inputRef.current?.click()}
             onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
             onDragLeave={() => setDragging(false)}
             onDrop={handleDrop}
-            className={`flex cursor-pointer flex-col items-center justify-center border-2 border-dashed px-6 py-16 transition-colors ${
+            className={`flex cursor-pointer flex-col items-center justify-center border-2 border-dashed px-6 py-12 transition-colors ${
               dragging ? 'border-accent-blue bg-accent-blue/5' : 'border-base-border hover:border-ink-muted'
             }`}
           >
             <UploadCloud className={`h-10 w-10 ${dragging ? 'text-accent-blue' : 'text-ink-muted'}`} />
-            <p className="mt-3 text-sm text-ink-primary">Drag & drop your bill here</p>
-            <p className="mt-1 font-mono text-xs text-ink-muted">PDF · JPG · PNG — max 10 MB</p>
+            <p className="mt-3 text-sm text-ink-primary">Drop vendor bill here or click to upload</p>
+            <p className="mt-1 font-mono text-xs text-ink-muted">Supported: PDF, JPG, PNG, Excel</p>
             <input
               ref={inputRef}
               type="file"
-              accept=".pdf,.jpg,.jpeg,.png"
+              accept=".pdf,.jpg,.jpeg,.png,.xlsx"
               className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) handleFile(file);
-              }}
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(); }}
             />
           </div>
 
-          {fileName && !extracted && (
-            <div className="mt-4 flex items-center gap-3 border border-base-border bg-base-panel px-4 py-3">
-              <FileText className="h-5 w-5 text-accent-blue" />
-              <span className="text-sm text-ink-primary">{fileName}</span>
-              <span className="ml-auto font-mono text-xs text-ink-muted">Extracting...</span>
+          {/* Sample invoice thumbnails */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <div className="flex h-28 items-center justify-center bg-base-hover border border-base-border">
+                <FileText className="h-8 w-8 text-ink-muted/40" />
+              </div>
+              <p className="text-center font-mono text-xs text-ink-muted">Sample: Tata Steel Bill</p>
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex h-28 items-center justify-center bg-base-hover border border-base-border">
+                <FileText className="h-8 w-8 text-ink-muted/40" />
+              </div>
+              <p className="text-center font-mono text-xs text-ink-muted">Sample: SKF Invoice</p>
+            </div>
+          </div>
+
+          {/* Document preview (demo: shown by default) */}
+          {uploaded && (
+            <div className="space-y-2 border border-base-border bg-base-panel">
+              <div className="flex items-center gap-2 border-b border-base-border px-4 py-2">
+                <ScanLine className="h-4 w-4 text-accent-blue" />
+                <span className="font-mono text-xs text-ink-primary">INV-10483 — SKF India — Uploaded</span>
+                <button
+                  onClick={() => { setUploaded(false); showToast('Document removed'); }}
+                  className="ml-auto text-ink-muted hover:text-ink-primary"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="relative h-80 bg-gradient-to-b from-base-hover to-base-panel flex items-center justify-center p-6">
+                {/* Mock invoice preview */}
+                <div className="w-full max-w-xs space-y-3 opacity-60">
+                  <div className="h-6 bg-ink-muted/20 w-3/4" />
+                  <div className="h-px bg-base-border" />
+                  <div className="space-y-1.5">
+                    <div className="h-3 bg-ink-muted/15 w-full" />
+                    <div className="h-3 bg-ink-muted/15 w-5/6" />
+                    <div className="h-3 bg-ink-muted/15 w-4/5" />
+                    <div className="h-3 bg-ink-muted/15 w-3/4" />
+                  </div>
+                  <div className="h-px bg-base-border" />
+                  <div className="space-y-1.5">
+                    <div className="h-3 bg-ink-muted/15 w-full" />
+                    <div className="h-3 bg-ink-muted/15 w-2/3" />
+                  </div>
+                  <div className="h-px bg-base-border" />
+                  <div className="h-5 bg-ink-muted/20 w-1/3 ml-auto" />
+                </div>
+                <span className="absolute bottom-3 right-4 font-mono text-xs text-ink-muted">Scanned Bill Preview</span>
+              </div>
             </div>
           )}
         </div>
-      </Panel>
 
-      {/* Extracted fields */}
-      {extracted && (
-        <>
-          <div className="flex items-center gap-3 border border-accent-amber/30 bg-accent-amber/10 px-5 py-3">
-            <AlertTriangle className="h-4 w-4 text-accent-amber" />
-            <span className="font-mono text-sm text-accent-amber">AI Extracted — Pending Match</span>
+        {/* RIGHT SIDE: AI Extracted Data */}
+        <div className="bg-base-panel p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-ink-primary">AI Extracted Data</h3>
+          </div>
+
+          {/* OCR confidence badge */}
+          <div className="flex items-center gap-3 border border-accent-green/30 bg-accent-green/10 px-4 py-3">
+            <CheckCircle2 className="h-4 w-4 text-accent-green" />
+            <span className="font-mono text-sm text-accent-green">OCR Extraction Complete — 94% confidence</span>
+          </div>
+
+          {/* Extracted fields grid */}
+          <div className="grid grid-cols-1 gap-px bg-base-border sm:grid-cols-2">
+            {extractedFields.map((f) => (
+              <div key={f.label} className="bg-base-panel px-4 py-3">
+                <p className="font-mono text-xs uppercase tracking-wider text-ink-muted">{f.label}</p>
+                <p className="mt-1 text-sm text-ink-primary">{f.value}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* AI Validation Alerts */}
+          <div className="space-y-2">
+            <h4 className="font-mono text-xs uppercase tracking-wider text-ink-muted">AI Validation Alerts</h4>
+            <ValidationAlert variant="amber" text="Price Mismatch: PO unit price is ₹310 — vendor billed ₹360 (+16.1% variance)" />
+            <ValidationAlert variant="green" text="GSTIN Valid — matches vendor master" />
+            <ValidationAlert variant="green" text="PO Reference found — PO-2026-1180" />
+            <ValidationAlert variant="amber" text="Quantity matches PO but GRN not yet received" />
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex flex-wrap gap-3 pt-1">
+            <BlueButton onClick={() => showToast('Sent to 3-Way Match')}>Send to 3-Way Match</BlueButton>
+            <OutlineButton onClick={() => showToast('Exception flagged')}>Flag Exception</OutlineButton>
+            <OutlineButton onClick={() => showToast('GRN request sent')}>Request GRN</OutlineButton>
             <button
-              onClick={() => { setFileName(null); setExtracted(false); }}
-              className="ml-auto text-ink-muted hover:text-ink-primary"
+              onClick={() => { setUploaded(false); showToast('Bill rejected'); }}
+              className="border border-accent-red/40 bg-transparent px-4 py-2 font-medium text-accent-red transition-colors hover:bg-accent-red/10"
             >
-              <X className="h-4 w-4" />
+              Reject Bill
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
-          <Panel title="Extracted Fields">
-            <div className="grid grid-cols-1 gap-px bg-base-border sm:grid-cols-2 lg:grid-cols-3">
-              {extractedFields.map((f) => (
-                <div key={f.label} className="bg-base-panel px-4 py-3">
-                  <p className="font-mono text-xs uppercase tracking-wider text-ink-muted">{f.label}</p>
-                  <p className="mt-1 text-sm text-ink-primary">{f.value}</p>
-                </div>
-              ))}
-            </div>
-          </Panel>
-
-          <Panel title="Line Items">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-base-border">
-                    <th className="px-5 py-3 text-left font-mono text-xs uppercase tracking-wider text-ink-muted">Description</th>
-                    <th className="px-5 py-3 text-left font-mono text-xs uppercase tracking-wider text-ink-muted">Qty</th>
-                    <th className="px-5 py-3 text-left font-mono text-xs uppercase tracking-wider text-ink-muted">Rate</th>
-                    <th className="px-5 py-3 text-left font-mono text-xs uppercase tracking-wider text-ink-muted">Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lineItems.map((item, i) => (
-                    <tr key={i} className="border-b border-base-border last:border-b-0">
-                      <td className="px-5 py-3 text-ink-primary">{item.desc}</td>
-                      <td className="px-5 py-3 font-mono text-ink-primary">{item.qty}</td>
-                      <td className="px-5 py-3 font-mono text-ink-primary">{item.rate}</td>
-                      <td className="px-5 py-3 font-mono text-ink-primary">{item.amount}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Panel>
-
-          <div className="flex gap-3">
-            <BlueButton onClick={() => showToast('Sent to 3-way match')}>Send to 3-Way Match</BlueButton>
-            <OutlineButton onClick={() => { setFileName(null); setExtracted(false); }}>
-              Upload Another
-            </OutlineButton>
-          </div>
-        </>
-      )}
+function ValidationAlert({ variant, text }: { variant: 'green' | 'amber'; text: string }) {
+  const Icon = variant === 'green' ? CheckCircle2 : AlertTriangle;
+  const color = variant === 'green' ? 'text-accent-green' : 'text-accent-amber';
+  const border = variant === 'green' ? 'border-accent-green/20' : 'border-accent-amber/20';
+  return (
+    <div className={`flex items-start gap-2 border ${border} px-3 py-2.5`}>
+      <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${color}`} />
+      <span className="text-sm text-ink-primary leading-snug">{text}</span>
     </div>
   );
 }
@@ -330,62 +412,87 @@ function ThreeWayMatch() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center gap-4">
-        <span className="font-mono text-xs uppercase tracking-wider text-ink-muted">Match Score</span>
-        <Badge variant="amber">PARTIAL</Badge>
-        <span className="font-mono text-xs text-ink-muted">Bill: INV-10482 · PO: PO-88213 · GRN: GRN-5521</span>
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="font-mono text-xs uppercase tracking-wider text-ink-muted">Reference:</span>
+        <span className="font-mono text-sm text-ink-primary">PO-2026-1180 · Invoice: SKF/2026/09/4821</span>
       </div>
 
+      {/* Three columns */}
       <div className="grid grid-cols-1 gap-px bg-base-border lg:grid-cols-3">
-        <MatchColumn title="Purchase Order" data={matchData.po} mismatches={mismatchFields} />
-        <MatchColumn title="Goods Receipt Note" data={matchData.grn} mismatches={[]} />
-        <MatchColumn title="Supplier Bill" data={matchData.bill} mismatches={mismatchFields} />
+        {/* Column 1: PO */}
+        <div className="bg-base-panel">
+          <div className="border-b border-base-border px-4 py-3">
+            <h3 className="text-sm font-semibold text-ink-primary">Purchase Order (PO-2026-1180)</h3>
+          </div>
+          <div className="divide-y divide-base-border">
+            {poData.map((row) => (
+              <div key={row.field} className="px-4 py-3">
+                <p className="font-mono text-xs uppercase tracking-wider text-ink-muted">{row.field}</p>
+                <p className="mt-1 font-mono text-sm text-ink-primary">{row.value}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Column 2: GRN */}
+        <div className="bg-base-panel">
+          <div className="border-b border-base-border px-4 py-3">
+            <h3 className="text-sm font-semibold text-ink-primary">Goods Receipt Note</h3>
+          </div>
+          <div className="divide-y divide-base-border">
+            {grnData.map((row) => (
+              <div key={row.field} className="px-4 py-3">
+                <p className="font-mono text-xs uppercase tracking-wider text-ink-muted">{row.field}</p>
+                <p className={`mt-1 font-mono text-sm ${row.warning ? 'text-accent-amber' : 'text-ink-primary'}`}>
+                  {row.warning && <AlertTriangle className="mr-1.5 inline h-3.5 w-3.5" />}
+                  {row.value}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Column 3: Supplier Bill */}
+        <div className="bg-base-panel">
+          <div className="border-b border-base-border px-4 py-3">
+            <h3 className="text-sm font-semibold text-ink-primary">Supplier Bill</h3>
+          </div>
+          <div className="divide-y divide-base-border">
+            {billData.map((row) => (
+              <div key={row.field} className="px-4 py-3">
+                <p className="font-mono text-xs uppercase tracking-wider text-ink-muted">{row.field}</p>
+                <p className={`mt-1 font-mono text-sm flex items-center gap-1.5 ${row.mismatch ? 'text-accent-red' : 'text-ink-primary'}`}>
+                  {row.value}
+                  {row.ok && <CheckCircle2 className="h-3.5 w-3.5 text-accent-green" />}
+                  {row.mismatch && <XCircle className="h-3.5 w-3.5 text-accent-red" />}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
 
-      <InfoBox variant="amber">
-        Price variance detected: PO unit price ₹14,200 vs Bill unit price ₹14,850 — difference of ₹650/unit (₹27,30,000 total).
-      </InfoBox>
+      {/* Match result banner */}
+      <div className="border border-accent-red/40 bg-accent-red/10 px-5 py-4">
+        <div className="flex items-center gap-3">
+          <AlertTriangle className="h-5 w-5 text-accent-red" />
+          <span className="font-mono text-sm font-semibold text-accent-red">
+            EXCEPTION — Price variance +16.1% | GRN pending
+          </span>
+        </div>
+      </div>
 
+      {/* Action buttons */}
       <div className="flex flex-wrap gap-3">
-        <BlueButton onClick={() => showToast('Invoice approved')}>Approve</BlueButton>
+        <BlueButton onClick={() => showToast('Invoice approved anyway')}>Approve Anyway</BlueButton>
         <OutlineButton onClick={() => showToast('Query sent to supplier')}>Query Supplier</OutlineButton>
-        <OutlineButton onClick={() => showToast('Escalation created')}>Escalate</OutlineButton>
-      </div>
-    </div>
-  );
-}
-
-function MatchColumn({
-  title,
-  data,
-  mismatches,
-}: {
-  title: string;
-  data: { field: string; value: string }[];
-  mismatches: string[];
-}) {
-  return (
-    <div className="bg-base-panel">
-      <div className="border-b border-base-border px-4 py-3">
-        <h3 className="text-sm font-semibold text-ink-primary">{title}</h3>
-      </div>
-      <div className="divide-y divide-base-border">
-        {data.map((row) => {
-          const isMismatch = mismatches.includes(row.field);
-          return (
-            <div key={row.field} className="px-4 py-3">
-              <p className="font-mono text-xs uppercase tracking-wider text-ink-muted">{row.field}</p>
-              <p
-                className={`mt-1 font-mono text-sm ${
-                  isMismatch ? 'text-accent-red' : 'text-ink-primary'
-                }`}
-              >
-                {row.value}
-                {isMismatch && <span className="ml-2 text-accent-red">⚠</span>}
-              </p>
-            </div>
-          );
-        })}
+        <OutlineButton onClick={() => showToast('On hold until GRN received')}>Hold for GRN</OutlineButton>
+        <button
+          onClick={() => showToast('Escalation created')}
+          className="border border-accent-red/40 bg-transparent px-4 py-2 font-medium text-accent-red transition-colors hover:bg-accent-red/10"
+        >
+          Escalate
+        </button>
       </div>
     </div>
   );
@@ -393,36 +500,79 @@ function MatchColumn({
 
 // ─── TAB 4: Vendor Master ───
 function VendorMaster() {
+  const { showToast } = useToast();
+  const [search, setSearch] = useState('');
+
+  const filtered = vendors.filter(v =>
+    v.name.toLowerCase().includes(search.toLowerCase()) ||
+    v.category.toLowerCase().includes(search.toLowerCase()) ||
+    v.gstin.toLowerCase().includes(search.toLowerCase())
+  );
+
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search suppliers by name, category, GSTIN..."
+            className="w-full border border-base-border bg-base-panel px-10 py-2.5 text-sm text-ink-primary placeholder:text-ink-muted focus:border-accent-blue focus:outline-none"
+          />
+        </div>
+        <BlueButton onClick={() => showToast('Add Supplier dialog opened')}>
+          <span className="flex items-center gap-2"><Plus className="h-4 w-4" /> Add Supplier</span>
+        </BlueButton>
+      </div>
+
       <Panel title="Vendor Master">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-base-border">
-                <th className="px-5 py-3 text-left font-mono text-xs uppercase tracking-wider text-ink-muted">Name</th>
+                <th className="px-5 py-3 text-left font-mono text-xs uppercase tracking-wider text-ink-muted">Supplier</th>
                 <th className="px-5 py-3 text-left font-mono text-xs uppercase tracking-wider text-ink-muted">Category</th>
+                <th className="px-5 py-3 text-left font-mono text-xs uppercase tracking-wider text-ink-muted">GSTIN</th>
                 <th className="px-5 py-3 text-left font-mono text-xs uppercase tracking-wider text-ink-muted">Risk Score</th>
                 <th className="px-5 py-3 text-right font-mono text-xs uppercase tracking-wider text-ink-muted">Total Bills</th>
                 <th className="px-5 py-3 text-right font-mono text-xs uppercase tracking-wider text-ink-muted">Exceptions</th>
-                <th className="px-5 py-3 text-left font-mono text-xs uppercase tracking-wider text-ink-muted">Last Bill Date</th>
+                <th className="px-5 py-3 text-left font-mono text-xs uppercase tracking-wider text-ink-muted">Last Bill</th>
+                <th className="px-5 py-3 text-left font-mono text-xs uppercase tracking-wider text-ink-muted">Status</th>
               </tr>
             </thead>
             <tbody>
-              {vendors.map((v) => (
+              {filtered.map((v) => (
                 <tr key={v.name} className="border-b border-base-border last:border-b-0 transition-colors hover:bg-base-hover">
-                  <td className="px-5 py-3 text-ink-primary">{v.name}</td>
-                  <td className="px-5 py-3 text-ink-muted">{v.category}</td>
-                  <td className="px-5 py-3">
-                    <Badge variant={v.risk}>{v.riskLabel}</Badge>
+                  <td className="px-5 py-3.5 text-ink-primary">{v.name}</td>
+                  <td className="px-5 py-3.5 text-ink-muted">{v.category}</td>
+                  <td className="px-5 py-3.5 font-mono text-xs text-ink-muted">{v.gstin}</td>
+                  <td className="px-5 py-3.5">
+                    <div className="flex items-center gap-2">
+                      <StatusDot variant={v.risk} />
+                      <span className={v.risk === 'red' ? 'text-accent-red' : v.risk === 'amber' ? 'text-accent-amber' : 'text-accent-green'}>
+                        {v.riskLabel}
+                      </span>
+                    </div>
                   </td>
-                  <td className="px-5 py-3 text-right font-mono text-ink-primary">{v.totalBills}</td>
-                  <td className={`px-5 py-3 text-right font-mono ${v.exceptions > 10 ? 'text-accent-red' : v.exceptions > 5 ? 'text-accent-amber' : 'text-ink-primary'}`}>
+                  <td className="px-5 py-3.5 text-right font-mono text-ink-primary">{v.totalBills}</td>
+                  <td className={`px-5 py-3.5 text-right font-mono ${v.exceptions > 5 ? 'text-accent-red' : v.exceptions > 2 ? 'text-accent-amber' : 'text-ink-primary'}`}>
                     {v.exceptions}
                   </td>
-                  <td className="px-5 py-3 font-mono text-ink-muted">{v.lastBill}</td>
+                  <td className="px-5 py-3.5 font-mono text-ink-muted">{v.lastBill}</td>
+                  <td className="px-5 py-3.5">
+                    <span className={v.status === 'Preferred' ? 'text-accent-green' : 'text-ink-primary'}>
+                      {v.status === 'Preferred' ? '★ Preferred' : v.status}
+                    </span>
+                  </td>
                 </tr>
               ))}
+              {filtered.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="px-5 py-8 text-center text-ink-muted">No suppliers found</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
