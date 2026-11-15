@@ -1,15 +1,6 @@
 import {
-  LayoutDashboard,
-  FileText,
-  Truck,
-  Receipt,
-  Factory,
-  ShieldCheck,
-  Wrench,
-  Boxes,
-  Package,
-  Bot,
-  BarChart3,
+  LayoutDashboard, FileText, Truck, Receipt, Factory, ShieldCheck, Wrench, Boxes, Package, Bot, BarChart3,
+  Smartphone, Settings,
 } from 'lucide-react';
 import type { ModuleId } from './types';
 
@@ -17,33 +8,37 @@ export interface NavItem {
   id: ModuleId;
   label: string;
   icon: typeof LayoutDashboard;
-  live?: 'green' | 'blue';
+  group: 'Operations' | 'Commercial' | 'Intelligence' | 'Workspace';
 }
 
 export const navItems: NavItem[] = [
-  { id: 'overview', label: 'Overview', icon: LayoutDashboard },
-  { id: 'sales', label: 'Sales & RFQ', icon: FileText },
-  { id: 'procurement', label: 'Procurement', icon: Truck },
-  { id: 'ap', label: 'AP Automation', icon: Receipt, live: 'green' },
-  { id: 'production', label: 'Production', icon: Factory },
-  { id: 'quality', label: 'Quality', icon: ShieldCheck },
-  { id: 'maintenance', label: 'Maintenance', icon: Wrench },
-  { id: 'inventory', label: 'Inventory', icon: Boxes },
-  { id: 'logistics', label: 'Logistics', icon: Package },
-  { id: 'assistant', label: 'AI Assistant', icon: Bot, live: 'blue' },
-  { id: 'reports', label: 'Reports', icon: BarChart3 },
+  { id: 'overview', label: 'Overview', icon: LayoutDashboard, group: 'Operations' },
+  { id: 'production', label: 'Production', icon: Factory, group: 'Operations' },
+  { id: 'quality', label: 'Quality', icon: ShieldCheck, group: 'Operations' },
+  { id: 'maintenance', label: 'Maintenance', icon: Wrench, group: 'Operations' },
+  { id: 'inventory', label: 'Inventory', icon: Boxes, group: 'Operations' },
+  { id: 'logistics', label: 'Logistics', icon: Package, group: 'Operations' },
+  { id: 'sales', label: 'Sales & RFQ', icon: FileText, group: 'Commercial' },
+  { id: 'procurement', label: 'Procurement', icon: Truck, group: 'Commercial' },
+  { id: 'ap', label: 'AP Automation', icon: Receipt, group: 'Commercial' },
+  { id: 'assistant', label: 'AI Assistant', icon: Bot, group: 'Intelligence' },
+  { id: 'reports', label: 'Reports', icon: BarChart3, group: 'Intelligence' },
+  { id: 'field', label: 'Field Apps', icon: Smartphone, group: 'Workspace' },
+  { id: 'settings', label: 'Settings', icon: Settings, group: 'Workspace' },
 ];
 
 export const moduleMeta: Record<ModuleId, { title: string; subtitle: string }> = {
-  overview: { title: 'Overview', subtitle: 'AI automation layer — sits on top of your existing systems' },
-  sales: { title: 'Sales & RFQ', subtitle: 'AI automation layer — sits on top of your existing systems' },
-  procurement: { title: 'Procurement', subtitle: 'AI automation layer — sits on top of your existing systems' },
-  ap: { title: 'AP Automation', subtitle: 'AI automation layer — sits on top of your existing systems' },
-  production: { title: 'Production', subtitle: 'AI automation layer — sits on top of your existing systems' },
-  quality: { title: 'Quality', subtitle: 'AI automation layer — sits on top of your existing systems' },
-  maintenance: { title: 'Maintenance', subtitle: 'AI automation layer — sits on top of your existing systems' },
-  inventory: { title: 'Inventory', subtitle: 'AI automation layer — sits on top of your existing systems' },
-  logistics: { title: 'Logistics', subtitle: 'AI automation layer — sits on top of your existing systems' },
-  assistant: { title: 'AI Assistant', subtitle: 'AI automation layer — sits on top of your existing systems' },
-  reports: { title: 'Reports', subtitle: 'AI automation layer — sits on top of your existing systems' },
+  overview: { title: 'Overview', subtitle: 'Plant-wide performance, exceptions and alerts' },
+  sales: { title: 'Sales & RFQ', subtitle: 'Customers, RFQs, quotations and sales orders' },
+  procurement: { title: 'Procurement', subtitle: 'Requisitions, sourcing, purchase orders and supplier performance' },
+  ap: { title: 'AP Automation', subtitle: 'Invoice capture, 3-way match, approvals and payments' },
+  production: { title: 'Production', subtitle: 'Planning, shift output, OEE and the Andon board' },
+  quality: { title: 'Quality', subtitle: 'Inspections, non-conformances and CAPA' },
+  maintenance: { title: 'Maintenance', subtitle: 'Equipment, preventive schedules and work orders' },
+  inventory: { title: 'Inventory', subtitle: 'Stock, movements, batches, audits and reorder planning' },
+  logistics: { title: 'Logistics', subtitle: 'Dispatch planning, shipments, vehicles and proof of delivery' },
+  assistant: { title: 'AI Assistant', subtitle: 'Ask questions about your company’s operational data' },
+  reports: { title: 'Reports', subtitle: 'Operational and financial reports with export and scheduling' },
+  field: { title: 'Field Apps', subtitle: 'Mobile workflows for the shop floor' },
+  settings: { title: 'Settings', subtitle: 'Company, masters, users, approvals and automation' },
 };

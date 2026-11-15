@@ -1,385 +1,161 @@
-import { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Sparkles } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Bot, Database, Send, Sparkles, Trash2, User } from 'lucide-react';
+import { useApp } from '@/lib/app';
+import { AI_BACKEND_ENABLED } from '@/lib/config';
+import { answer, type Answer } from '@/lib/assistant';
+import { defaultFilters } from '@/lib/analytics';
+import { useDataset } from '@/lib/useDataset';
+import { DEFAULT_COMPANY_SETTINGS } from '@/lib/data/schema';
+import { SupabaseBackend } from '@/lib/data/supabaseBackend';
+import { navigate, setParam, useRoute } from '@/lib/router';
+import { Badge } from '@/components/ui';
 
-interface Message {
-  role: 'user' | 'ai';
-  text: string;
-}
+interface Message { role: 'user' | 'ai'; text?: string; answer?: Answer; mode?: 'rules' | 'llm'; error?: string }
 
-const initialMessages: Message[] = [
-  {
-    role: 'user',
-    text: 'Show me today\u2019s exceptions',
-  },
-  {
-    role: 'ai',
-    text: `Here\u2019s a summary of active exceptions as of today, Sep 16 2026:
-
-\u{1F534} AP Automation \u2014 3 new exceptions
-- INV-10482: Price mismatch vs PO-2026-1180 (SKF Bearings, +16%)
-- INV-10479: Duplicate bill detected \u2014 same amount from Greaves Cotton
-- INV-10475: Missing GRN \u2014 bill received, goods not confirmed
-
-\u{1F7E1} Quality \u2014 1 active alert
-- Batch B-2026-441: 18 units rejected, Surface finish defect on Line 1
-
-\u{1F534} Inventory \u2014 1 critical
-- Steel Coil A: Stockout risk in 6 days \u2014 reorder not placed yet
-
-Total: 5 exceptions need your attention today.
-Want me to open any of these?`,
-  },
-  {
-    role: 'user',
-    text: 'Which vendor bills are overdue?',
-  },
-  {
-    role: 'ai',
-    text: `3 vendor bills are overdue as of today:
-
-| Supplier        | Bill No   | Amount   | Due Date | Days Overdue |
-|-----------------|-----------|----------|----------|--------------|
-| Tata Steel      | INV-10471 | \u20B918.5L | Sep 10   | 6 days       |
-| Asian Paints    | INV-10465 | \u20B962K   | Sep 12   | 4 days       |
-| Bosch India     | INV-10460 | \u20B995K   | Sep 14   | 2 days       |
-
-Total overdue: \u20B919.57L
-Recommend: Tata Steel payment is highest priority \u2014 they supply Steel Coil A which is already at stockout risk.
-
-Want me to trigger payment approval workflow?`,
-  },
-  {
-    role: 'user',
-    text: 'What is Line 2 OEE today?',
-  },
-  {
-    role: 'ai',
-    text: `Line 2 OEE today: 82% (below 85% threshold \u26A0\uFE0F)
-
-Breakdown:
-- Availability: 91% (planned downtime: 45 min for shift changeover)
-- Performance: 88% (speed loss on Motor M2)
-- Quality: 98.4% (1 rejection in last 200 units)
-
-Root cause flagged by AI:
-Vibration anomaly on Motor M2 \u2014 detected 3 days ago, trending worse. Maintenance WO-448 is IN PROGRESS (Ravi Kumar).
-
-Predicted impact: If Motor M2 not serviced today, OEE could drop to ~74% by tomorrow.
-
-Want me to escalate WO-448 priority to URGENT?`,
-  },
+const promptGroups = [
+  { category: 'Production', prompts: ['What is today’s production?', 'Which products are below production targets?', 'What is the OEE this week?'] },
+  { category: 'Maintenance', prompts: ['Which machine has the highest downtime?', 'Which machines require maintenance?', 'Show open work orders'] },
+  { category: 'Inventory & purchasing', prompts: ['Which raw material will run out first?', 'Which purchase orders are delayed?'] },
+  { category: 'Quality & cost', prompts: ['What is the rejection percentage?', 'What is the manufacturing cost per unit?'] },
+  { category: 'Finance & logistics', prompts: ['Which vendor bills are overdue?', 'Show invoice exceptions', 'Any delayed shipments?'] },
 ];
 
-interface PromptGroup {
-  category: string;
-  prompts: string[];
-}
-
-const promptGroups: PromptGroup[] = [
-  {
-    category: 'AP & Finance',
-    prompts: [
-      'Which vendor bills are overdue?',
-      "Show me today's AP exceptions",
-      'What is our open payables this week?',
-      'Which supplier has the most mismatches?',
-    ],
-  },
-  {
-    category: 'Production',
-    prompts: [
-      'What is Line 2 OEE today?',
-      'Which production line is underperforming?',
-      "Show me today's output vs target",
-    ],
-  },
-  {
-    category: 'Quality',
-    prompts: [
-      'Any defect alerts today?',
-      'Which batch failed QC this week?',
-    ],
-  },
-  {
-    category: 'Inventory',
-    prompts: [
-      'What items are at stockout risk?',
-      'Show me excess inventory',
-    ],
-  },
-  {
-    category: 'Maintenance',
-    prompts: [
-      'Which equipment needs urgent attention?',
-      'Show open work orders',
-    ],
-  },
-  {
-    category: 'Logistics',
-    prompts: [
-      'Any delayed shipments today?',
-      'Which carrier has the worst SLA?',
-    ],
-  },
-];
-
-const cannedResponses: { match: string[]; text: string }[] = [
-  {
-    match: ['overdue', 'vendor bill'],
-    text: `3 vendor bills are overdue as of today:
-
-| Supplier        | Bill No   | Amount   | Due Date | Days Overdue |
-|-----------------|-----------|----------|----------|--------------|
-| Tata Steel      | INV-10471 | \u20B918.5L | Sep 10   | 6 days       |
-| Asian Paints    | INV-10465 | \u20B962K   | Sep 12   | 4 days       |
-| Bosch India     | INV-10460 | \u20B995K   | Sep 14   | 2 days       |
-
-Total overdue: \u20B919.57L
-Recommend: Tata Steel payment is highest priority \u2014 they supply Steel Coil A which is already at stockout risk.
-
-Want me to trigger payment approval workflow?`,
-  },
-  {
-    match: ['ap exception', 'today\u2019s exception', 'exceptions'],
-    text: `Here\u2019s a summary of active exceptions as of today, Sep 16 2026:
-
-\u{1F534} AP Automation \u2014 3 new exceptions
-- INV-10482: Price mismatch vs PO-2026-1180 (SKF Bearings, +16%)
-- INV-10479: Duplicate bill detected \u2014 same amount from Greaves Cotton
-- INV-10475: Missing GRN \u2014 bill received, goods not confirmed
-
-\u{1F7E1} Quality \u2014 1 active alert
-- Batch B-2026-441: 18 units rejected, Surface finish defect on Line 1
-
-\u{1F534} Inventory \u2014 1 critical
-- Steel Coil A: Stockout risk in 6 days \u2014 reorder not placed yet
-
-Total: 5 exceptions need your attention today.`,
-  },
-  {
-    match: ['oee', 'line 2'],
-    text: `Line 2 OEE today: 82% (below 85% threshold \u26A0\uFE0F)
-
-Breakdown:
-- Availability: 91% (planned downtime: 45 min for shift changeover)
-- Performance: 88% (speed loss on Motor M2)
-- Quality: 98.4% (1 rejection in last 200 units)
-
-Root cause: Vibration anomaly on Motor M2 \u2014 WO-448 IN PROGRESS.
-
-Want me to escalate WO-448 priority to URGENT?`,
-  },
-  {
-    match: ['stockout', 'stock out'],
-    text: `2 items at stockout risk:
-
-\u{1F534} Steel Coil A \u2014 Stockout in 6 days, reorder not placed
-\u{1F7E1} Hydraulic Oil ISO-68 \u2014 Stockout in 12 days, PO pending approval
-
-Recommend: Raise PO for Steel Coil A immediately (Tata Steel, 50 MT).`,
-  },
-  {
-    match: ['delayed shipment', 'delay'],
-    text: `1 shipment delayed today:
-
-\u{1F534} SHP-2026-0891 \u2014 Meridian Steel Co., Hyderabad
-Carrier: DTDC | Delay at Nagpur hub | ETA pushed by 1 day
-Auto-notification sent to customer.
-
-[Reassign Carrier] option available.`,
-  },
-  {
-    match: ['work order', 'maintenance', 'equipment'],
-    text: `8 open work orders. 3 predictive alerts:
-
-\u{1F534} Line 2 Motor M2 \u2014 Vibration anomaly, failure predicted in 4\u20137 days
-\u{1F7E1} Compressor CU-03 \u2014 Oil pressure trending down
-\u{1F7E1} Conveyor CB-Line1 \u2014 1,840 hrs since last replacement
-
-WO-448 (Motor M2) is IN PROGRESS \u2014 Ravi Kumar.`,
-  },
-  {
-    match: ['defect', 'quality', 'qc'],
-    text: `1 active quality alert today:
-
-\u{1F534} Batch B-2026-441 \u2014 Steel Frame A12
-Surface finish defect \u2014 18 units rejected
-Root cause: Coolant contamination (batch CN-2026-09)
-
-Action needed: Schedule coolant batch swap on Line 1.`,
-  },
-  {
-    match: ['carrier', 'sla'],
-    text: `Carrier SLA performance (this month):
-
-BlueDart: 98% on-time | \u20B91,240/shipment
-FedEx:    96% on-time | \u20B91,820/shipment
-TCI:      93% on-time | \u20B9540/shipment
-DTDC:     88% on-time | \u20B9680/shipment \u26A0\uFE0F
-
-DTDC is below 95% SLA target \u2014 recommend reviewing DTDC volume.`,
-  },
-];
-
-function getAIResponse(input: string): string {
-  const lower = input.toLowerCase();
-  for (const canned of cannedResponses) {
-    if (canned.match.some((m) => lower.includes(m))) {
-      return canned.text;
-    }
-  }
-  return `I can help with AP & Finance, Production, Quality, Inventory, Maintenance, and Logistics. Try one of the suggested questions on the left, or ask me about today's exceptions, overdue bills, OEE, or shipment delays.`;
-}
+const STORE = 'gnanova.assistant.history';
 
 export default function AIAssistant() {
-  const [messages, setMessages] = useState<Message[]>(initialMessages);
+  const { company, backend, mode } = useApp();
+  const route = useRoute();
+  const ds = useDataset(defaultFilters(90), { lookbackDays: 90 });
+  const settings = useMemo(() => ({ ...DEFAULT_COMPANY_SETTINGS, ...(company?.settings ?? {}) }), [company]);
+  const [messages, setMessages] = useState<Message[]>(() => {
+    try { return JSON.parse(sessionStorage.getItem(`${STORE}.${company?.id}`) ?? '[]') as Message[]; } catch { return []; }
+  });
   const [input, setInput] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
+  const [busy, setBusy] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const llm = AI_BACKEND_ENABLED && backend instanceof SupabaseBackend;
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages, isTyping]);
+    sessionStorage.setItem(`${STORE}.${company?.id}`, JSON.stringify(messages.slice(-40)));
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+  }, [messages, company?.id]);
 
-  const send = (text: string) => {
-    if (!text.trim()) return;
-    const userMsg: Message = { role: 'user', text };
-    setMessages((prev) => [...prev, userMsg]);
+  const send = useCallback(async (text: string) => {
+    if (!text.trim() || ds.loading) return;
+    setMessages((m) => [...m, { role: 'user', text }]);
     setInput('');
-    setIsTyping(true);
-    setTimeout(() => {
-      const aiMsg: Message = { role: 'ai', text: getAIResponse(text) };
-      setMessages((prev) => [...prev, aiMsg]);
-      setIsTyping(false);
-    }, 600);
-  };
+    setBusy(true);
+    try {
+      if (llm) {
+        const res = await (backend as SupabaseBackend).invoke<Answer>('ai-assistant', { question: text, company_id: company?.id });
+        setMessages((m) => [...m, { role: 'ai', answer: res, mode: 'llm' }]);
+      } else {
+        setMessages((m) => [...m, { role: 'ai', answer: answer(text, ds, settings), mode: 'rules' }]);
+      }
+    } catch (e) {
+      setMessages((m) => [...m, { role: 'ai', answer: answer(text, ds, settings), mode: 'rules', error: `AI service unavailable (${(e as Error).message}). Showing rule-based answer.` }]);
+    } finally {
+      setBusy(false);
+    }
+  }, [ds, settings, llm, backend, company?.id]);
+
+  const q = route.params.get('q');
+  useEffect(() => {
+    if (q && !ds.loading) {
+      setParam('q', null);
+      void send(q);
+    }
+  }, [q, ds.loading, send]);
 
   return (
-    <div className="flex h-[calc(100vh-8rem)] flex-col">
-      {/* Header */}
-      <div className="mb-4 flex items-center justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-accent-blue" />
-            <h2 className="text-lg font-semibold text-ink-primary">AI Assistant</h2>
-          </div>
-          <p className="mt-1 text-sm text-ink-muted">Ask anything about your operations — powered by Claude AI</p>
+    <div className="flex h-[calc(100dvh-11rem)] min-h-[480px] flex-col lg:h-[calc(100dvh-7.5rem)]">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Sparkles className="h-5 w-5 text-accent-blue" />
+          <p className="text-sm text-ink-muted">Answers are computed from {company?.name}’s records only{mode === 'demo' ? ' (demo data)' : ''}.</p>
         </div>
-        <div className="flex items-center gap-2 border border-accent-green/30 bg-accent-green/10 px-3 py-1.5">
-          <span className="h-2 w-2 rounded-full bg-accent-green" />
-          <span className="font-mono text-xs font-semibold uppercase tracking-wider text-accent-green">Online</span>
+        <div className="flex items-center gap-2">
+          <Badge variant={llm ? 'green' : 'blue'}>{llm ? 'AI model via secure backend' : 'Rule-based analytics'}</Badge>
+          {messages.length > 0 && <button onClick={() => setMessages([])} className="inline-flex items-center gap-1 text-xs text-ink-muted hover:text-accent-red"><Trash2 className="h-3.5 w-3.5" />Clear</button>}
         </div>
       </div>
 
-      {/* Body: left prompts + right chat */}
-      <div className="flex min-h-0 flex-1 gap-px bg-base-border">
-        {/* Left: Quick Prompts */}
-        <div className="hidden w-[30%] shrink-0 overflow-y-auto bg-base-panel md:block">
-          <div className="sticky top-0 border-b border-base-border bg-base-panel px-4 py-3">
-            <h3 className="text-sm font-semibold text-ink-primary">Suggested Questions</h3>
-          </div>
-          <div className="p-4 space-y-5">
-            {promptGroups.map((group) => (
-              <div key={group.category}>
-                <p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-wider text-ink-muted">
-                  {group.category}
-                </p>
+      <div className="flex min-h-0 flex-1 gap-px overflow-hidden rounded-xl border border-base-border bg-base-border shadow-card">
+        <aside className="hidden w-[30%] max-w-xs shrink-0 overflow-y-auto bg-base-panel md:block">
+          <div className="sticky top-0 border-b border-base-border bg-base-panel px-4 py-3"><h3 className="text-sm font-semibold">Suggested questions</h3></div>
+          <div className="space-y-5 p-4">
+            {promptGroups.map((g) => (
+              <div key={g.category}>
+                <p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-wider text-ink-muted">{g.category}</p>
                 <div className="space-y-1.5">
-                  {group.prompts.map((prompt) => (
-                    <button
-                      key={prompt}
-                      onClick={() => send(prompt)}
-                      className="block w-full border border-base-border px-3 py-2 text-left text-xs leading-snug text-ink-muted transition-colors hover:border-accent-blue hover:bg-base-hover hover:text-accent-blue"
-                    >
-                      {prompt}
-                    </button>
+                  {g.prompts.map((p) => (
+                    <button key={p} onClick={() => void send(p)} className="block w-full rounded-lg border border-base-border px-3 py-2 text-left text-xs leading-snug text-ink-muted hover:border-accent-blue hover:bg-base-hover hover:text-accent-blue">{p}</button>
                   ))}
                 </div>
               </div>
             ))}
           </div>
-        </div>
+        </aside>
 
-        {/* Right: Chat window */}
-        <div className="flex min-w-0 flex-1 flex-col bg-base-panel">
-          {/* Messages */}
-          <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto p-5 space-y-4">
-            {messages.map((msg, i) => (
-              <div
-                key={i}
-                className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
-              >
-                <div
-                  className={`flex h-8 w-8 shrink-0 items-center justify-center ${
-                    msg.role === 'user' ? 'bg-accent-blue' : 'border border-base-border bg-base-bg'
-                  }`}
-                >
-                  {msg.role === 'user' ? (
-                    <User className="h-4 w-4 text-white" />
-                  ) : (
-                    <Bot className="h-4 w-4 text-accent-blue" />
-                  )}
-                </div>
-                <div
-                  className={`max-w-[80%] whitespace-pre-wrap px-4 py-3 text-sm leading-relaxed ${
-                    msg.role === 'user'
-                      ? 'bg-accent-blue text-white'
-                      : 'border border-base-border bg-base-bg text-ink-primary'
-                  }`}
-                >
-                  {msg.text}
-                </div>
-              </div>
-            ))}
-
-            {isTyping && (
-              <div className="flex gap-3">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center border border-base-border bg-base-bg">
-                  <Bot className="h-4 w-4 text-accent-blue" />
-                </div>
-                <div className="flex items-center gap-1.5 border border-base-border bg-base-bg px-4 py-3">
-                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-muted [animation-delay:-0.3s]" />
-                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-muted [animation-delay:-0.15s]" />
-                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-muted" />
-                </div>
+        <section className="flex min-w-0 flex-1 flex-col bg-base-panel">
+          <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3 sm:p-5" aria-live="polite">
+            {!messages.length && (
+              <div className="mx-auto max-w-md py-8 text-center">
+                <Bot className="mx-auto h-10 w-10 text-accent-blue" />
+                <p className="mt-3 font-medium">Ask about production, downtime, stock, purchasing, quality, cost, maintenance, payables or logistics.</p>
+                <p className="mt-1 text-sm text-ink-muted">Every answer lists the records it used. If something is not in your data, I will say so rather than guess.</p>
               </div>
             )}
+            {messages.map((m, i) => (
+              <div key={i} className={`flex gap-3 ${m.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${m.role === 'user' ? 'bg-accent-blue' : 'border border-base-border bg-base-subtle'}`}>
+                  {m.role === 'user' ? <User className="h-4 w-4 text-white" /> : <Bot className="h-4 w-4 text-accent-blue" />}
+                </div>
+                {m.role === 'user' ? (
+                  <div className="max-w-[85%] rounded-xl bg-accent-blue px-4 py-2.5 text-sm text-white">{m.text}</div>
+                ) : m.answer ? <AnswerView a={m.answer} error={m.error} /> : null}
+              </div>
+            ))}
+            {busy && <div className="flex gap-1.5 pl-11"><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-faint [animation-delay:-0.3s]" /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-faint [animation-delay:-0.15s]" /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-faint" /></div>}
           </div>
 
-          {/* Input bar */}
-          <div className="shrink-0 border-t border-base-border">
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                send(input);
-              }}
-              className="p-4"
-            >
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder="Ask about AP, Production, Quality, Inventory, Maintenance or Logistics..."
-                  className="flex-1 border border-base-border bg-base-bg px-4 py-2.5 text-sm text-ink-primary outline-none transition-colors placeholder:text-ink-muted focus:border-accent-blue"
-                />
-                <button
-                  type="submit"
-                  className="flex items-center gap-2 bg-accent-blue px-5 py-2.5 font-medium text-white transition-colors hover:bg-blue-500"
-                >
-                  <Send className="h-4 w-4" />
-                  Send
-                </button>
-              </div>
-              <p className="mt-2 text-center text-[11px] text-ink-muted">
-                AI Assistant has access to all live modules
-              </p>
-            </form>
+          <div className="scrollbar-none flex gap-2 overflow-x-auto border-t border-base-border px-3 pt-3 md:hidden">
+            {promptGroups.flatMap((g) => g.prompts).slice(0, 8).map((p) => (
+              <button key={p} onClick={() => void send(p)} className="shrink-0 rounded-full border border-base-border px-3 py-1.5 text-xs text-ink-muted">{p}</button>
+            ))}
           </div>
-        </div>
+          <form onSubmit={(e) => { e.preventDefault(); void send(input); }} className="flex gap-2 p-3 sm:p-4">
+            <input value={input} onChange={(e) => setInput(e.target.value)} disabled={ds.loading} placeholder={ds.loading ? 'Loading company data…' : 'Ask a question…'} aria-label="Question" className="input min-w-0 flex-1" />
+            <button type="submit" disabled={!input.trim() || busy} className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-accent-blue px-4 font-medium text-white hover:bg-blue-700 disabled:opacity-50"><Send className="h-4 w-4" /><span className="hidden sm:inline">Send</span></button>
+          </form>
+        </section>
       </div>
+    </div>
+  );
+}
+
+function AnswerView({ a, error }: { a: Answer; error?: string }) {
+  return (
+    <div className="min-w-0 max-w-[92%] space-y-3 rounded-xl border border-base-border bg-base-subtle px-4 py-3 text-sm leading-relaxed">
+      {error && <p className="text-xs text-accent-amber">{error}</p>}
+      <p>{a.summary}</p>
+      {a.bullets && <ul className="list-disc space-y-1 pl-5 text-ink-muted">{a.bullets.map((b) => <li key={b}>{b}</li>)}</ul>}
+      {a.table && a.table.rows.length > 0 && (
+        <div className="overflow-x-auto rounded-lg border border-base-border bg-white">
+          <table className="w-full text-xs">
+            <thead className="bg-base-subtle"><tr>{a.table.headers.map((h) => <th key={h} className="whitespace-nowrap px-3 py-2 text-left font-mono font-semibold uppercase tracking-wider text-ink-muted">{h}</th>)}</tr></thead>
+            <tbody>{a.table.rows.map((r, i) => <tr key={i} className="border-t border-base-border">{r.map((c, j) => <td key={j} className="whitespace-nowrap px-3 py-2">{String(c)}</td>)}</tr>)}</tbody>
+          </table>
+        </div>
+      )}
+      {a.actions && a.actions.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {a.actions.map((x) => <button key={x.link} onClick={() => navigate(x.link)} className="rounded-lg border border-accent-blue/30 bg-white px-3 py-1.5 text-xs font-medium text-accent-blue hover:bg-accent-blue/5">{x.label} →</button>)}
+        </div>
+      )}
+      {a.sources.length > 0 && (
+        <p className="flex flex-wrap items-center gap-1 text-[11px] text-ink-faint"><Database className="h-3 w-3" />Sources: {a.sources.join(' · ')}{a.period ? ` · period: ${a.period}` : ''}</p>
+      )}
     </div>
   );
 }

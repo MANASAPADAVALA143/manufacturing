@@ -9,7 +9,9 @@ export type ModuleId =
   | 'inventory'
   | 'logistics'
   | 'assistant'
-  | 'reports';
+  | 'reports'
+  | 'field'
+  | 'settings';
 
 export interface ModuleMeta {
   id: ModuleId;

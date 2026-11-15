@@ -1,0 +1,39 @@
+{
+  "name": "GNANOVA – WhatsApp delivery status relay",
+  "nodes": [
+    { "parameters": { "httpMethod": "GET", "path": "gnanova-whatsapp", "responseMode": "responseNode" }, "name": "Meta verify (GET)", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [0, 0], "webhookId": "gnanova-whatsapp-verify" },
+    {
+      "parameters": { "conditions": { "conditions": [{ "leftValue": "={{ $json.query['hub.verify_token'] }}", "rightValue": "={{ $env.WHATSAPP_VERIFY_TOKEN }}", "operator": { "type": "string", "operation": "equals" } }] } },
+      "name": "Token matches?", "type": "n8n-nodes-base.if", "typeVersion": 2, "position": [220, 0]
+    },
+    { "parameters": { "respondWith": "text", "responseBody": "={{ $json.query['hub.challenge'] }}" }, "name": "Echo challenge", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [440, -80] },
+    { "parameters": { "respondWith": "noData", "options": { "responseCode": 403 } }, "name": "Forbidden", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [440, 80] },
+    { "parameters": { "httpMethod": "POST", "path": "gnanova-whatsapp", "responseMode": "onReceived" }, "name": "Meta status (POST)", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [0, 300], "webhookId": "gnanova-whatsapp-status" },
+    {
+      "parameters": {
+        "jsCode": "// Flattens WhatsApp status callbacks and signs one request per status.\nconst crypto = require('crypto');\nconst out = [];\nfor (const entry of $json.body?.entry ?? []) {\n  for (const change of entry.changes ?? []) {\n    for (const s of change.value?.statuses ?? []) {\n      const body = JSON.stringify({ action: 'delivery_status', provider_message_id: s.id, status: s.status, error: s.errors?.[0]?.title });\n      const ts = Math.floor(Date.now() / 1000).toString();\n      out.push({ json: { body, ts, sig: crypto.createHmac('sha256', $env.GNANOVA_N8N_SECRET).update(`${ts}.${body}`).digest('hex') } });\n    }\n  }\n}\nreturn out;"
+      },
+      "name": "Extract & sign statuses", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST", "url": "={{ $env.GNANOVA_FUNCTIONS_URL }}/n8n-inbound", "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "x-gnanova-timestamp", "value": "={{ $json.ts }}" },
+          { "name": "x-gnanova-signature", "value": "={{ $json.sig }}" },
+          { "name": "Content-Type", "value": "application/json" }
+        ] },
+        "sendBody": true, "contentType": "raw", "rawContentType": "application/json", "body": "={{ $json.body }}",
+        "options": { "retry": { "maxTries": 3, "waitBetweenTries": 3000 } }
+      },
+      "name": "Update outbox", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [480, 300]
+    }
+  ],
+  "connections": {
+    "Meta verify (GET)": { "main": [[{ "node": "Token matches?", "type": "main", "index": 0 }]] },
+    "Token matches?": { "main": [[{ "node": "Echo challenge", "type": "main", "index": 0 }], [{ "node": "Forbidden", "type": "main", "index": 0 }]] },
+    "Meta status (POST)": { "main": [[{ "node": "Extract & sign statuses", "type": "main", "index": 0 }]] },
+    "Extract & sign statuses": { "main": [[{ "node": "Update outbox", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

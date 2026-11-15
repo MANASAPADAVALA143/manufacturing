@@ -1,0 +1,42 @@
+{
+  "name": "GNANOVA – Scheduler (dispatch, daily digest, weekly report)",
+  "nodes": [
+    { "parameters": { "rule": { "interval": [{ "field": "minutes", "minutesInterval": 1 }] } }, "name": "Every minute", "type": "n8n-nodes-base.scheduleTrigger", "typeVersion": 1.2, "position": [0, 0] },
+    { "parameters": { "rule": { "interval": [{ "field": "days", "triggerAtHour": 7 }] } }, "name": "Daily 07:00", "type": "n8n-nodes-base.scheduleTrigger", "typeVersion": 1.2, "position": [0, 200] },
+    { "parameters": { "rule": { "interval": [{ "field": "weeks", "triggerAtDay": [1], "triggerAtHour": 8 }] } }, "name": "Monday 08:00", "type": "n8n-nodes-base.scheduleTrigger", "typeVersion": 1.2, "position": [0, 400] },
+    { "parameters": { "assignments": { "assignments": [{ "id": "a1", "name": "action", "value": "dispatch", "type": "string" }] } }, "name": "action = dispatch", "type": "n8n-nodes-base.set", "typeVersion": 3.4, "position": [240, 0] },
+    { "parameters": { "assignments": { "assignments": [{ "id": "a2", "name": "action", "value": "run_scheduled_jobs", "type": "string" }] } }, "name": "action = run_scheduled_jobs", "type": "n8n-nodes-base.set", "typeVersion": 3.4, "position": [240, 200] },
+    { "parameters": { "assignments": { "assignments": [{ "id": "a3", "name": "action", "value": "weekly_report", "type": "string" }] } }, "name": "action = weekly_report", "type": "n8n-nodes-base.set", "typeVersion": 3.4, "position": [240, 400] },
+    {
+      "parameters": {
+        "jsCode": "// Signs the request for the n8n-inbound Edge Function.\n// Requires NODE_FUNCTION_ALLOW_BUILTIN=crypto and env GNANOVA_N8N_SECRET.\nconst crypto = require('crypto');\nreturn $input.all().map((item) => {\n  const body = JSON.stringify({ action: item.json.action });\n  const ts = Math.floor(Date.now() / 1000).toString();\n  const sig = crypto.createHmac('sha256', $env.GNANOVA_N8N_SECRET).update(`${ts}.${body}`).digest('hex');\n  return { json: { body, ts, sig } };\n});"
+      },
+      "name": "Sign request", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [480, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GNANOVA_FUNCTIONS_URL }}/n8n-inbound",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "x-gnanova-timestamp", "value": "={{ $json.ts }}" },
+          { "name": "x-gnanova-signature", "value": "={{ $json.sig }}" },
+          { "name": "Content-Type", "value": "application/json" }
+        ] },
+        "sendBody": true, "contentType": "raw", "rawContentType": "application/json", "body": "={{ $json.body }}",
+        "options": { "timeout": 60000, "retry": { "maxTries": 3, "waitBetweenTries": 5000 } }
+      },
+      "name": "Call GNANOVA", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [720, 200]
+    }
+  ],
+  "connections": {
+    "Every minute": { "main": [[{ "node": "action = dispatch", "type": "main", "index": 0 }]] },
+    "Daily 07:00": { "main": [[{ "node": "action = run_scheduled_jobs", "type": "main", "index": 0 }]] },
+    "Monday 08:00": { "main": [[{ "node": "action = weekly_report", "type": "main", "index": 0 }]] },
+    "action = dispatch": { "main": [[{ "node": "Sign request", "type": "main", "index": 0 }]] },
+    "action = run_scheduled_jobs": { "main": [[{ "node": "Sign request", "type": "main", "index": 0 }]] },
+    "action = weekly_report": { "main": [[{ "node": "Sign request", "type": "main", "index": 0 }]] },
+    "Sign request": { "main": [[{ "node": "Call GNANOVA", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "timezone": "Asia/Kolkata" }
+}

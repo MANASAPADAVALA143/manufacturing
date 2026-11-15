@@ -1,0 +1,34 @@
+{
+  "name": "GNANOVA – Event consumer (example)",
+  "nodes": [
+    { "parameters": { "httpMethod": "POST", "path": "gnanova-events", "responseMode": "responseNode", "options": { "rawBody": true } }, "name": "GNANOVA event", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [0, 0], "webhookId": "gnanova-events" },
+    {
+      "parameters": {
+        "jsCode": "// Verifies the signature added by notify-dispatch (channel = webhook). Rejects replays older than 5 minutes.\nconst crypto = require('crypto');\nconst ts = $json.headers['x-gnanova-timestamp'];\nconst sig = $json.headers['x-gnanova-signature'];\nconst raw = Buffer.from($binary?.data?.data ?? '', 'base64').toString('utf8') || JSON.stringify($json.body);\nconst expected = crypto.createHmac('sha256', $env.GNANOVA_N8N_SECRET).update(`${ts}.${raw}`).digest('hex');\nconst fresh = Math.abs(Date.now() / 1000 - Number(ts)) < 300;\nreturn [{ json: { valid: fresh && sig === expected, event: $json.body } }];"
+      },
+      "name": "Verify signature", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [220, 0]
+    },
+    {
+      "parameters": { "conditions": { "conditions": [{ "leftValue": "={{ $json.valid }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true" } }] } },
+      "name": "Valid?", "type": "n8n-nodes-base.if", "typeVersion": 2, "position": [440, 0]
+    },
+    { "parameters": { "respondWith": "json", "responseBody": "={{ { ok: true } }}" }, "name": "Ack", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [660, -100] },
+    { "parameters": { "respondWith": "noData", "options": { "responseCode": 401 } }, "name": "Reject", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [660, 100] },
+    {
+      "parameters": { "conditions": { "conditions": [{ "leftValue": "={{ $('Verify signature').item.json.event.severity }}", "rightValue": "critical", "operator": { "type": "string", "operation": "equals" } }] } },
+      "name": "Critical?", "type": "n8n-nodes-base.if", "typeVersion": 2, "position": [880, -100]
+    },
+    {
+      "parameters": { "jsCode": "// Replace with your escalation: Microsoft Teams, Slack, PagerDuty, a ticketing system, etc.\nreturn [{ json: { escalate: $('Verify signature').item.json.event } }];" },
+      "name": "Escalate (customise)", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [1100, -180]
+    }
+  ],
+  "connections": {
+    "GNANOVA event": { "main": [[{ "node": "Verify signature", "type": "main", "index": 0 }]] },
+    "Verify signature": { "main": [[{ "node": "Valid?", "type": "main", "index": 0 }]] },
+    "Valid?": { "main": [[{ "node": "Ack", "type": "main", "index": 0 }], [{ "node": "Reject", "type": "main", "index": 0 }]] },
+    "Ack": { "main": [[{ "node": "Critical?", "type": "main", "index": 0 }]] },
+    "Critical?": { "main": [[{ "node": "Escalate (customise)", "type": "main", "index": 0 }], []] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

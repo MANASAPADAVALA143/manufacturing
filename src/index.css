@@ -4,33 +4,92 @@
 
 html {
   scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
-  background-color: #0F1419;
-  color: #E8EAED;
+  background-color: #f3f5f9;
+  color: #0f172a;
   font-family: 'Inter', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overscroll-behavior-y: none;
+  /* Defence in depth against accidental sideways scrolling; `clip` keeps position:sticky working. */
+  overflow-x: clip;
 }
 
 ::selection {
-  background-color: rgba(59, 130, 246, 0.3);
-  color: #E8EAED;
+  background-color: rgba(37, 99, 235, 0.2);
 }
 
-/* Custom scrollbar */
+:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+/* Prevent iOS zoom on input focus: inputs are ≥16px on touch devices. */
+@media (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 ::-webkit-scrollbar-track {
-  background: #0F1419;
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #262E38;
-  border-radius: 0;
+  background: #cbd5e1;
+  border-radius: 8px;
+  border: 2px solid #f3f5f9;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3B82F6;
+  background: #94a3b8;
+}
+
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+@layer components {
+  .input {
+    @apply w-full rounded-lg border border-base-border bg-white px-3 py-2.5 text-sm text-ink-primary outline-none transition-colors placeholder:text-ink-faint focus:border-accent-blue focus:ring-2 focus:ring-accent-blue/15 disabled:cursor-not-allowed disabled:bg-base-subtle disabled:text-ink-muted;
+  }
+  .label {
+    @apply mb-1.5 block text-xs font-medium text-ink-muted;
+  }
+  .th {
+    @apply whitespace-nowrap px-4 py-3 text-left font-mono text-[11px] font-semibold uppercase tracking-wider text-ink-muted;
+  }
+  .td {
+    @apply px-4 py-3 align-middle;
+  }
+}
+
+@media print {
+  body {
+    background: #fff;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+}
+.print-only {
+  display: none;
 }

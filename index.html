@@ -2,19 +2,30 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Manufacturing AI Command Center</title>
-    <meta name="description" content="The AI layer that sits on top of your existing ERP, SAP or Oracle — and fixes the gaps those systems can't see." />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>GNANOVA Manufacturing OS</title>
+    <meta name="description" content="GNANOVA Manufacturing OS — AI-Powered Manufacturing Operations & Business Intelligence." />
+    <meta name="theme-color" content="#0B1B33" />
+    <meta name="color-scheme" content="light" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="GNANOVA" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-    <meta property="og:image" content="https://bolt.new/static/og_default.png">
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:image" content="https://bolt.new/static/og_default.png">
-</head>
+    <style>
+      /* Splash shown until React mounts (also used as the installed-app launch screen). */
+      #splash { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: #0b1b33; color: #fff; font: 600 15px system-ui, sans-serif; letter-spacing: .08em; }
+      #splash img { width: 72px; height: 72px; border-radius: 16px; }
+    </style>
+  </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><div id="splash"><img src="/icons/icon-192.png" alt="" />GNANOVA</div></div>
+    <noscript>GNANOVA Manufacturing OS requires JavaScript.</noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

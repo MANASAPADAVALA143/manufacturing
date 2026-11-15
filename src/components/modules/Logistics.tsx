@@ -1,231 +1,278 @@
-import { StatCard, Panel, Badge } from '@/components/ui';
+import { useMemo } from 'react';
+import { AlertTriangle, Clock, Package, Printer, Truck } from 'lucide-react';
+import { Badge, Button, EmptyState, InfoBox, Panel, Spinner, StatCard, StatGrid } from '@/components/ui';
+import EntityManager, { StatusBadge } from '@/components/data/EntityManager';
+import { BarChart, CHART } from '@/components/charts';
+import { useApp } from '@/lib/app';
+import { entity } from '@/lib/data/entities';
+import { useActions, useRefMaps } from '@/lib/data/hooks';
+import type { BaseRow, LineItem } from '@/lib/data/schema';
+import { defaultFilters, dispatchPerformance } from '@/lib/analytics';
+import { useDataset } from '@/lib/useDataset';
+import { addDays, daysBetween, ymd } from '@/lib/dates';
+import { date, money, pct, qty } from '@/lib/format';
+import { printReport } from '@/lib/export';
+import { navigate } from '@/lib/router';
+import { routeFor } from '@/lib/routes';
 import { useToast } from '@/components/Toast';
-import { AlertTriangle, Truck, Package, Clock } from 'lucide-react';
+import { ModuleTabs, useModuleTab } from './shared';
 
-const shipments = [
-  { id: 'SHP-2026-0892', customer: 'Delta Agro Industries', destination: 'Guntur', carrier: 'BlueDart', eta: 'Today', etaBadge: 'amber' as const, status: 'OUT FOR DELIVERY', statusBadge: 'blue' as const },
-  { id: 'SHP-2026-0891', customer: 'Meridian Steel Co.', destination: 'Hyderabad', carrier: 'DTDC', eta: '17 Sep', etaBadge: 'red' as const, status: 'DELAYED', statusBadge: 'red' as const },
-  { id: 'SHP-2026-0890', customer: 'Vantage Fabricators', destination: 'Pune', carrier: 'FedEx', eta: '18 Sep', etaBadge: 'grey' as const, status: 'IN TRANSIT', statusBadge: 'blue' as const },
-  { id: 'SHP-2026-0889', customer: 'Krishna Industries', destination: 'Vijayawada', carrier: 'TCI', eta: '19 Sep', etaBadge: 'grey' as const, status: 'DISPATCHED', statusBadge: 'blue' as const },
-  { id: 'SHP-2026-0888', customer: 'Apex Components', destination: 'Chennai', carrier: 'BlueDart', eta: '20 Sep', etaBadge: 'grey' as const, status: 'PROCESSING', statusBadge: 'grey' as const },
+const TABS = [
+  { id: 'dashboard', label: 'Dashboard' },
+  { id: 'planning', label: 'Dispatch planning' },
+  { id: 'shipments', label: 'Delivery orders' },
+  { id: 'carriers', label: 'Carrier performance' },
+  { id: 'vehicles', label: 'Vehicles' },
+  { id: 'transporters', label: 'Transporters' },
 ];
 
-const carriers = [
-  { name: 'BlueDart', shipments: 58, onTime: 98, avgDelay: '0.2 days', cost: '₹1,240' },
-  { name: 'FedEx', shipments: 34, onTime: 96, avgDelay: '0.4 days', cost: '₹1,820' },
-  { name: 'DTDC', shipments: 41, onTime: 88, avgDelay: '1.1 days', cost: '₹680' },
-  { name: 'TCI', shipments: 15, onTime: 93, avgDelay: '0.7 days', cost: '₹540' },
-];
-
-const slaWeeks = [
-  { week: 'Week 1', value: 96 },
-  { week: 'Week 2', value: 95 },
-  { week: 'Week 3', value: 91 },
-  { week: 'Week 4', value: 94 },
-];
-
-function slaBarColor(pct: number): string {
-  if (pct >= 95) return 'bg-accent-green';
-  if (pct >= 92) return 'bg-accent-amber';
-  return 'bg-accent-red';
+export default function Logistics({ tab }: { tab: string | null }) {
+  const current = useModuleTab(tab, TABS);
+  return (
+    <div className="space-y-5">
+      <ModuleTabs module="logistics" tabs={TABS} current={current} />
+      {current === 'dashboard' && <Dashboard />}
+      {current === 'planning' && <Planning />}
+      {current === 'shipments' && <EntityManager table="shipments" rowActions={(r) => <ChallanButton s={r} />} detailExtra={(r) => <PodHint s={r} />} />}
+      {current === 'carriers' && <Carriers />}
+      {current === 'vehicles' && <EntityManager table="vehicles" />}
+      {current === 'transporters' && <EntityManager table="transporters" />}
+    </div>
+  );
 }
 
-export default function Logistics() {
+function PodHint({ s }: { s: BaseRow }) {
+  if (s.status === 'delivered') return <InfoBox variant="amber">Upload the signed proof of delivery (photo or PDF) below, then mark “POD received”.</InfoBox>;
+  if (s.status === 'delayed') return <InfoBox variant="red">Delayed — see the audit trail for the reported reason. ETA {date(s.eta)}.</InfoBox>;
+  return null;
+}
+
+function ChallanButton({ s }: { s: BaseRow }) {
+  const { company } = useApp();
+  const { name, maps } = useRefMaps(['customers', 'materials', 'transporters', 'vehicles', 'sales_orders']);
   const { showToast } = useToast();
-
+  const lines = (s.lines as LineItem[]) ?? [];
   return (
-    <div className="space-y-6">
-      {/* KPI strip */}
-      <div className="grid grid-cols-1 gap-px bg-base-border sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Shipments This Month" value="148" />
-        <StatCard label="On-Time Delivery" value="94.2%" variant="green" />
-        <StatCard label="Delayed Shipments" value="4" variant="amber" />
-        <StatCard label="Avg Transit Time" value="2.8 days" />
-      </div>
+    <Button tone="secondary" icon={Printer} onClick={() => {
+      const ok = printReport({
+        title: `Delivery Challan ${s.challan_no ?? s.number}`,
+        subtitle: `${name('customers', s.customer_id)} · ${s.destination} · SO ${name('sales_orders', s.sales_order_id)} · E-way bill ${s.eway_bill_no ?? '—'} · LR ${s.lr_no ?? '—'} · Vehicle ${maps.vehicles?.get(String(s.vehicle_id))?.registration_no ?? '—'} (${name('transporters', s.transporter_id)})`,
+        company: company?.name ?? '',
+        rows: lines,
+        cols: [
+          { label: 'Code', value: (l) => String(maps.materials?.get(l.material_id)?.code ?? '') },
+          { label: 'Description', value: (l) => name('materials', l.material_id) },
+          { label: 'HSN', value: (l) => String(maps.materials?.get(l.material_id)?.hsn_code ?? '') },
+          { label: 'Qty', value: (l) => l.qty },
+          { label: 'UOM', value: (l) => String(maps.materials?.get(l.material_id)?.uom ?? '') },
+        ],
+        summary: [['DO number', String(s.number)], ['Dispatch date', date(s.dispatch_date)], ['Receiver signature', '______________________']],
+      });
+      if (!ok) showToast('Allow pop-ups to print the challan', 'warning');
+    }}>Print challan</Button>
+  );
+}
 
-      {/* Active Shipments */}
-      <Panel title="Active Shipments">
-        <div className="overflow-x-auto">
+function Dashboard() {
+  const ds = useDataset(defaultFilters(30));
+  const def = entity('shipments');
+  const { name } = useRefMaps(['customers', 'transporters']);
+  const month = ymd().slice(0, 7);
+  const m = useMemo(() => {
+    const perf = dispatchPerformance(ds, addDays(ymd(), -29), ymd());
+    const delivered = ds.shipments.filter((s) => s.delivered_on && s.dispatch_date);
+    const transit = delivered.length ? delivered.reduce((a, s) => a + daysBetween(String(s.dispatch_date), String(s.delivered_on)), 0) / delivered.length : null;
+    const weeks = [3, 2, 1, 0].map((w) => {
+      const to = addDays(ymd(), -7 * w), from = addDays(to, -6);
+      return { label: `${from.slice(5)}–${to.slice(5)}`, p: dispatchPerformance(ds, from, to).onTimePct };
+    });
+    return { perf, transit, weeks };
+  }, [ds]);
+  if (ds.loading) return <Spinner />;
+  const active = m.perf.active;
+  return (
+    <div className="space-y-5">
+      <StatGrid cols={5}>
+        <StatCard label="Shipments this month" value={String(ds.shipments.filter((s) => String(s.dispatch_date).startsWith(month)).length)} />
+        <StatCard label="On-time delivery (30d)" value={pct(m.perf.onTimePct)} variant={(m.perf.onTimePct ?? 100) < 95 ? 'amber' : 'green'} />
+        <StatCard label="Delayed / past ETA" value={String(m.perf.late.length)} variant={m.perf.late.length ? 'red' : 'green'} />
+        <StatCard label="Avg transit time" value={m.transit === null ? '—' : `${m.transit.toFixed(1)} days`} />
+        <StatCard label="Freight (30d)" value={money(m.perf.freight, true)} />
+      </StatGrid>
+
+      <Panel title="Active shipments" actions={<Button size="sm" tone="secondary" onClick={() => navigate('/logistics/shipments')}>All delivery orders</Button>}>
+        <div className="hidden overflow-x-auto md:block">
           <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-base-border">
-                <th className="px-5 py-3 text-left font-mono text-xs uppercase tracking-wider text-ink-muted">Shipment #</th>
-                <th className="px-5 py-3 text-left font-mono text-xs uppercase tracking-wider text-ink-muted">Customer</th>
-                <th className="px-5 py-3 text-left font-mono text-xs uppercase tracking-wider text-ink-muted">Destination</th>
-                <th className="px-5 py-3 text-left font-mono text-xs uppercase tracking-wider text-ink-muted">Carrier</th>
-                <th className="px-5 py-3 text-left font-mono text-xs uppercase tracking-wider text-ink-muted">ETA</th>
-                <th className="px-5 py-3 text-left font-mono text-xs uppercase tracking-wider text-ink-muted">Status</th>
-              </tr>
-            </thead>
+            <thead className="border-b border-base-border bg-base-subtle"><tr>{['DO #', 'Customer', 'Destination', 'Carrier', 'ETA', 'Status'].map((h) => <th key={h} className="th">{h}</th>)}</tr></thead>
             <tbody>
-              {shipments.map((s) => (
-                <tr key={s.id} className="border-b border-base-border last:border-b-0 transition-colors hover:bg-base-hover">
-                  <td className="px-5 py-3 font-mono text-ink-primary">{s.id}</td>
-                  <td className="px-5 py-3 text-ink-primary">{s.customer}</td>
-                  <td className="px-5 py-3 text-ink-muted">{s.destination}</td>
-                  <td className="px-5 py-3 text-ink-muted">{s.carrier}</td>
-                  <td className="px-5 py-3">
-                    <span className={s.etaBadge === 'red' ? 'font-mono text-accent-red' : s.etaBadge === 'amber' ? 'font-mono text-accent-amber' : 'font-mono text-ink-muted'}>
-                      {s.eta}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3">
-                    <span className="inline-flex items-center gap-2">
-                      {s.statusBadge === 'red' && <AlertTriangle className="h-3.5 w-3.5 text-accent-red" />}
-                      <Badge variant={s.statusBadge}>{s.status}</Badge>
-                    </span>
-                  </td>
-                </tr>
-              ))}
+              {active.map((s) => {
+                const late = m.perf.late.includes(s);
+                return (
+                  <tr key={s.id} onClick={() => navigate(routeFor('shipments', s.id))} className="cursor-pointer border-b border-base-border last:border-0 hover:bg-base-hover">
+                    <td className="td font-mono">{String(s.number)}</td>
+                    <td className="td">{name('customers', s.customer_id)}</td>
+                    <td className="td text-ink-muted">{String(s.destination)}</td>
+                    <td className="td text-ink-muted">{name('transporters', s.transporter_id) || '—'}</td>
+                    <td className={`td font-mono ${late ? 'text-accent-red' : String(s.eta) === ymd() ? 'text-accent-amber' : 'text-ink-muted'}`}>{date(s.eta)}</td>
+                    <td className="td"><span className="inline-flex items-center gap-2">{late && <AlertTriangle className="h-3.5 w-3.5 text-accent-red" />}<StatusBadge def={def} value={s.status} /></span></td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
+        <ul className="divide-y divide-base-border md:hidden">
+          {active.map((s) => (
+            <li key={s.id}><button onClick={() => navigate(routeFor('shipments', s.id))} className="w-full px-4 py-3 text-left">
+              <div className="flex justify-between gap-2"><span className="font-mono text-sm">{String(s.number)}</span><StatusBadge def={def} value={s.status} /></div>
+              <p className="text-xs text-ink-muted">{name('customers', s.customer_id)} · {String(s.destination)} · ETA {date(s.eta)}</p>
+            </button></li>
+          ))}
+        </ul>
+        {!active.length && <EmptyState title="No active shipments" />}
       </Panel>
 
-      {/* AI Delay Alerts */}
-      <div>
-        <h3 className="mb-3 text-sm font-semibold text-ink-muted">AI Delay Alerts</h3>
-        <div className="space-y-px bg-base-border">
-          <div className="flex items-start gap-4 border border-accent-red/30 bg-accent-red/5 p-5">
-            <div className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full bg-accent-red" />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-ink-primary">
-                SHP-2026-0891 to Meridian Steel — DTDC delay at Nagpur hub.
-              </p>
-              <p className="mt-1 text-sm text-ink-muted">
-                ETA pushed by 1 day. Auto-notification sent to customer.
-              </p>
-            </div>
-            <div className="flex shrink-0 gap-2">
-              <button
-                onClick={() => showToast('Viewing shipment SHP-2026-0891')}
-                className="border border-base-border px-3 py-1.5 text-xs font-medium text-ink-primary transition-colors hover:bg-base-hover"
-              >
-                View
-              </button>
-              <button
-                onClick={() => showToast('Reassigning carrier for SHP-2026-0891')}
-                className="border border-accent-red/40 px-3 py-1.5 text-xs font-medium text-accent-red transition-colors hover:bg-accent-red/10"
-              >
-                Reassign Carrier
-              </button>
-            </div>
-          </div>
-
-          <div className="flex items-start gap-4 border border-accent-amber/30 bg-accent-amber/5 p-5">
-            <div className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full bg-accent-amber" />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-ink-primary">
-                SHP-2026-0887 — Delivered 1 day late last week.
-              </p>
-              <p className="mt-1 text-sm text-ink-muted">
-                Customer satisfaction score: 3.8/5.
-              </p>
-            </div>
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <div>
+          <h3 className="mb-3 text-sm font-semibold text-ink-muted">Delay alerts</h3>
+          <div className="space-y-2">
+            {!m.perf.late.length && <InfoBox variant="green">No delayed shipments.</InfoBox>}
+            {m.perf.late.map((s) => (
+              <div key={s.id} className="flex flex-col gap-3 rounded-xl border border-accent-red/30 bg-accent-red/5 p-4 sm:flex-row sm:items-start">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold">{String(s.number)} to {name('customers', s.customer_id)} — {name('transporters', s.transporter_id) || 'own fleet'}</p>
+                  <p className="mt-1 text-sm text-ink-muted">{s.status === 'delayed' ? 'Reported delayed' : 'Past ETA'} · ETA {date(s.eta)} · {String(s.destination)}</p>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <Button size="sm" tone="secondary" onClick={() => navigate(routeFor('shipments', s.id))}>View</Button>
+                  <Button size="sm" tone="danger" onClick={() => navigate(routeFor('shipments', s.id))}>Reassign carrier</Button>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
+        <Panel title="SLA performance — last 4 weeks" subtitle="On-time % of deliveries completed each week (target 95%)">
+          <div className="p-4"><BarChart labels={m.weeks.map((w) => w.label)} unit="%" target={{ value: 95, label: 'Target' }} series={[{ name: 'On-time %', color: CHART.teal, values: m.weeks.map((w) => w.p ?? 0) }]} /></div>
+        </Panel>
       </div>
 
-      {/* SLA Performance */}
-      <Panel title="SLA Performance — Last 4 Weeks">
-        <div className="p-5">
-          <div className="relative">
-            {/* Target line at 95% */}
-            <div className="relative h-48">
-              {/* Target line */}
-              <div
-                className="absolute left-0 right-0 border-t border-dashed border-accent-amber/50"
-                style={{ bottom: `${(95 / 100) * 100}%` }}
-              >
-                <span className="absolute -top-5 right-0 font-mono text-[10px] uppercase tracking-wider text-accent-amber">
-                  Target 95%
-                </span>
-              </div>
+      <div className="grid grid-cols-1 gap-px overflow-hidden rounded-xl border border-base-border bg-base-border sm:grid-cols-3">
+        {[[Package, 'Total active', `${active.length} shipments`, 'text-accent-blue'], [Clock, 'Avg transit', m.transit === null ? '—' : `${m.transit.toFixed(1)} days`, 'text-accent-amber'], [Truck, 'Delivered (30d)', String(m.perf.delivered), 'text-accent-green']].map(([Icon, k, v, c]) => {
+          const I = Icon as typeof Package;
+          return (
+            <div key={String(k)} className="flex items-center gap-3 bg-base-panel p-4"><I className={`h-5 w-5 ${c}`} /><div><p className="font-mono text-[11px] uppercase tracking-wider text-ink-muted">{String(k)}</p><p className="font-mono text-sm font-semibold">{String(v)}</p></div></div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
-              {/* Bars */}
-              <div className="absolute bottom-0 left-0 right-0 flex items-end justify-around gap-4">
-                {slaWeeks.map((w) => (
-                  <div key={w.week} className="flex flex-1 flex-col items-center gap-2">
-                    <div className="flex h-40 w-full max-w-[80px] items-end justify-center">
-                      <div
-                        className={`w-full max-w-[48px] ${slaBarColor(w.value)} transition-all duration-500`}
-                        style={{ height: `${(w.value / 100) * 160}px` }}
-                      >
-                        <div className="flex h-full items-start justify-center pt-1">
-                          <span className="font-mono text-[10px] font-semibold text-white">{w.value}%</span>
-                        </div>
-                      </div>
-                    </div>
-                    <span className="font-mono text-xs text-ink-muted">{w.week}</span>
+function Planning() {
+  const ds = useDataset(defaultFilters(30));
+  const { can } = useApp();
+  const act = useActions();
+  const { name } = useRefMaps(['customers', 'materials']);
+  if (ds.loading) return <Spinner />;
+  const fgStock = new Map<string, number>();
+  for (const b of ds.balances) fgStock.set(String(b.material_id), (fgStock.get(String(b.material_id)) ?? 0) + Number(b.qty));
+  const orders = ds.salesOrders.filter((s) => ['confirmed', 'in_production', 'ready_to_dispatch'].includes(String(s.status))).sort((a, b) => String(a.delivery_date).localeCompare(String(b.delivery_date)));
+  const planned = ds.shipments.filter((s) => ['planned', 'loaded'].includes(String(s.status)));
+  return (
+    <div className="space-y-5">
+      <Panel title="Orders to dispatch" subtitle="Open sales orders by delivery date, with finished-goods availability">
+        {!orders.length ? <EmptyState title="No open orders" /> : (
+          <ul className="divide-y divide-base-border">
+            {orders.map((so) => {
+              const shipped = ds.shipments.filter((x) => x.sales_order_id === so.id && x.status !== 'cancelled').reduce((s, x) => s + ((x.lines as LineItem[]) ?? []).reduce((a, l) => a + Number(l.qty), 0), 0);
+              const ordered = ((so.lines as LineItem[]) ?? []).reduce((s, l) => s + Number(l.qty), 0);
+              const days = daysBetween(ymd(), String(so.delivery_date));
+              const available = ((so.lines as LineItem[]) ?? []).every((l) => (fgStock.get(l.material_id) ?? 0) >= Number(l.qty));
+              return (
+                <li key={so.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium"><button className="font-mono text-accent-blue hover:underline" onClick={() => navigate(routeFor('sales_orders', so.id))}>{String(so.number)}</button> · {name('customers', so.customer_id)}</p>
+                    <p className="mt-0.5 text-xs text-ink-muted">{((so.lines as LineItem[]) ?? []).map((l) => `${name('materials', l.material_id)} × ${qty(l.qty, 0)}`).join(', ')} · shipped {qty(shipped, 0)} / {qty(ordered, 0)}</p>
                   </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    <Badge variant={days < 0 ? 'red' : days <= 3 ? 'amber' : 'grey'}>{days < 0 ? `${-days} d late` : `due in ${days} d`}</Badge>
+                    <Badge variant={available ? 'green' : 'amber'}>{available ? 'FG available' : 'FG short'}</Badge>
+                    {can('logistics', 'create') && shipped < ordered && (
+                      <Button size="sm" loading={act.busy} onClick={() => void act.rpc<BaseRow>('create_shipment_from_so', { p_sales_order_id: so.id }, 'Delivery order planned').then((o) => o?.status === 'saved' && navigate(routeFor('shipments', o.result.id))).catch(() => undefined)}>Plan delivery</Button>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </Panel>
+      <Panel title="Planned & loading" subtitle="Assign transporter and vehicle, then load and dispatch">
+        {!planned.length ? <EmptyState title="Nothing planned" /> : (
+          <ul className="divide-y divide-base-border">
+            {planned.map((s) => (
+              <li key={s.id}><button onClick={() => navigate(routeFor('shipments', s.id))} className="flex w-full flex-wrap items-center justify-between gap-2 px-4 py-3 text-left hover:bg-base-hover">
+                <span className="text-sm"><span className="font-mono">{String(s.number)}</span> · {name('customers', s.customer_id)} · {String(s.destination)}</span>
+                <span className="flex items-center gap-2">{!s.vehicle_id && <Badge variant="amber">No vehicle</Badge>}<StatusBadge def={entity('shipments')} value={s.status} /></span>
+              </button></li>
+            ))}
+          </ul>
+        )}
+      </Panel>
+    </div>
+  );
+}
 
-      {/* Carrier Performance */}
-      <Panel title="Carrier Performance">
+function Carriers() {
+  const ds = useDataset(defaultFilters(90), { lookbackDays: 90 });
+  if (ds.loading) return <Spinner />;
+  const rows = ds.shipments.reduce((acc, s) => {
+    const k = String(s.transporter_id ?? 'own');
+    const e = acc.get(k) ?? { shipments: 0, delivered: 0, onTime: 0, delayDays: 0, freight: 0, units: 0 };
+    e.shipments++;
+    e.freight += Number(s.freight_cost ?? 0);
+    e.units += ((s.lines as LineItem[]) ?? []).reduce((a, l) => a + Number(l.qty), 0);
+    if (s.delivered_on) {
+      e.delivered++;
+      const late = daysBetween(String(s.eta), String(s.delivered_on));
+      if (late <= 0) e.onTime++; else e.delayDays += late;
+    }
+    acc.set(k, e);
+    return acc;
+  }, new Map<string, { shipments: number; delivered: number; onTime: number; delayDays: number; freight: number; units: number }>());
+  return <CarrierTable rows={[...rows.entries()]} />;
+}
+
+function CarrierTable({ rows }: { rows: [string, { shipments: number; delivered: number; onTime: number; delayDays: number; freight: number; units: number }][] }) {
+  const { name } = useRefMaps(['transporters']);
+  return (
+    <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+      <Panel title="Carrier performance (90 days)" className="lg:col-span-2">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-base-border">
-                <th className="px-5 py-3 text-left font-mono text-xs uppercase tracking-wider text-ink-muted">Carrier</th>
-                <th className="px-5 py-3 text-left font-mono text-xs uppercase tracking-wider text-ink-muted">Shipments</th>
-                <th className="px-5 py-3 text-left font-mono text-xs uppercase tracking-wider text-ink-muted">On-Time %</th>
-                <th className="px-5 py-3 text-left font-mono text-xs uppercase tracking-wider text-ink-muted">Avg Delay</th>
-                <th className="px-5 py-3 text-left font-mono text-xs uppercase tracking-wider text-ink-muted">Cost/Shipment</th>
-              </tr>
-            </thead>
+          <table className="w-full min-w-[640px] text-sm">
+            <thead className="border-b border-base-border bg-base-subtle"><tr>{['Carrier', 'Shipments', 'On-time %', 'Avg delay (late)', 'Freight', 'Cost / shipment', 'Cost / unit'].map((h) => <th key={h} className="th">{h}</th>)}</tr></thead>
             <tbody>
-              {carriers.map((c) => (
-                <tr key={c.name} className="border-b border-base-border last:border-b-0 transition-colors hover:bg-base-hover">
-                  <td className="px-5 py-3">
-                    <span className="flex items-center gap-2 text-ink-primary">
-                      <Truck className="h-4 w-4 text-ink-muted" />
-                      {c.name}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3 font-mono text-ink-primary">{c.shipments}</td>
-                  <td className="px-5 py-3">
-                    <span className={`font-mono font-semibold ${c.onTime >= 95 ? 'text-accent-green' : c.onTime >= 90 ? 'text-accent-amber' : 'text-accent-red'}`}>
-                      {c.onTime}%
-                    </span>
-                  </td>
-                  <td className="px-5 py-3 font-mono text-ink-muted">{c.avgDelay}</td>
-                  <td className="px-5 py-3 font-mono text-ink-primary">{c.cost}</td>
-                </tr>
-              ))}
+              {rows.map(([k, v]) => {
+                const ot = v.delivered ? (v.onTime / v.delivered) * 100 : null;
+                return (
+                  <tr key={k} className="border-b border-base-border last:border-0">
+                    <td className="td"><span className="flex items-center gap-2"><Truck className="h-4 w-4 text-ink-muted" />{k === 'own' ? 'Own fleet' : name('transporters', k)}</span></td>
+                    <td className="td font-mono">{v.shipments}</td>
+                    <td className={`td font-mono font-semibold ${ot === null ? '' : ot >= 95 ? 'text-accent-green' : ot >= 90 ? 'text-accent-amber' : 'text-accent-red'}`}>{pct(ot, 0)}</td>
+                    <td className="td font-mono">{v.delivered - v.onTime ? `${(v.delayDays / (v.delivered - v.onTime)).toFixed(1)} d` : '—'}</td>
+                    <td className="td font-mono">{money(v.freight, true)}</td>
+                    <td className="td font-mono">{money(v.freight / v.shipments)}</td>
+                    <td className="td font-mono">{v.units ? money(v.freight / v.units) : '—'}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       </Panel>
-
-      {/* Summary icons for quick reference */}
-      <div className="grid grid-cols-1 gap-px bg-base-border sm:grid-cols-3">
-        <div className="flex items-center gap-3 border border-base-border bg-base-panel p-4">
-          <Package className="h-5 w-5 text-accent-blue" />
-          <div>
-            <p className="font-mono text-xs uppercase tracking-wider text-ink-muted">Total Active</p>
-            <p className="font-mono text-sm font-semibold text-ink-primary">5 shipments</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3 border border-base-border bg-base-panel p-4">
-          <Clock className="h-5 w-5 text-accent-amber" />
-          <div>
-            <p className="font-mono text-xs uppercase tracking-wider text-ink-muted">Avg Transit</p>
-            <p className="font-mono text-sm font-semibold text-ink-primary">2.8 days</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3 border border-base-border bg-base-panel p-4">
-          <Truck className="h-5 w-5 text-accent-green" />
-          <div>
-            <p className="font-mono text-xs uppercase tracking-wider text-ink-muted">Best Carrier</p>
-            <p className="font-mono text-sm font-semibold text-ink-primary">BlueDart 98%</p>
-          </div>
-        </div>
-      </div>
+      <Panel title="Freight by carrier">
+        <div className="p-4"><BarChart horizontal labels={rows.map(([k]) => (k === 'own' ? 'Own fleet' : name('transporters', k)))} series={[{ name: 'Freight', color: CHART.navy, values: rows.map(([, v]) => v.freight) }]} /></div>
+      </Panel>
     </div>
   );
 }

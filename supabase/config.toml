@@ -1,0 +1,30 @@
+# Supabase CLI project config (supabase link / db push / functions deploy).
+project_id = "gnanova-manufacturing-os"
+
+[api]
+schemas = ["public"]
+max_rows = 5000
+
+[auth]
+site_url = "http://localhost:5173"
+additional_redirect_urls = ["https://app.yourdomain.com"]
+enable_signup = true
+
+[auth.email]
+enable_confirmations = true
+
+[storage]
+file_size_limit = "15MiB"
+
+# User-facing functions require a valid user JWT.
+[functions.ai-assistant]
+verify_jwt = true
+[functions.document-extract]
+verify_jwt = true
+[functions.invite-member]
+verify_jwt = true
+[functions.notify-dispatch]
+verify_jwt = true
+# n8n authenticates with an HMAC signature instead of a JWT.
+[functions.n8n-inbound]
+verify_jwt = false
